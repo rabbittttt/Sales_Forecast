@@ -1,0 +1,573 @@
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import logging
+import re
+import os
+import shutil
+import subprocess
+import sys
+import webbrowser
+from collections import defaultdict
+from datetime import date, datetime
+from pathlib import Path
+from time import perf_counter
+from typing import Any
+from openpyxl import load_workbook
+
+from core.components import add_kpi_comparisons
+from core.china_calendar import PUBLISHED_YEARS
+from core.config import load_config
+from core.data_paths import orders_input_directory, assert_output_is_private
+from core.discovery import discover_subjects, set_capabilities
+from core.excel import WorkbookItem, WorkbookStore, clean_text, format_excel_cell, load_data_workbook, reset_conflict_diagnostics
+from core.forecast_summary import SUMMARY_NAME, visible_target_names
+from core.model_identity import FORECAST_SOURCE_PATH
+from core.renderer import b64gzip, render_dashboard, forecast_manifest, write_raw_block_assets
+from core.validation import validate_manifest
+from modules.registry import MODULES
+
+
+ROOT = Path(__file__).resolve().parent
+CODE_ROOT = ROOT.parent
+PROJECT_ROOT = CODE_ROOT.parent if CODE_ROOT.name.lower() == "scripts" else CODE_ROOT
+AUTO_OPEN_HTML = True
+LOGGER = logging.getLogger("sales_forecast")
+BUILD_DIAGNOSTICS: list[str] = []
+DIAGNOSTIC_COUNTS = {"WARNING": 0, "ERROR": 0}
+
+
+class DuplicateDiagnosticFilter(logging.Filter):
+    """Emit the same issue once across refresh and build, never hide new issues."""
+
+    def __init__(self):
+        super().__init__()
+        self.seen = set()
+
+    def filter(self, record):
+        cached = getattr(record, "_diagnostic_filter_result", None)
+        if cached and cached[0] is self:
+            return cached[1]
+        message = record.getMessage()
+        eligible = ((record.levelno == logging.WARNING and not getattr(record, "diagnostic_continuation", False))
+                    or "[Excel格式兼容]" in message)
+        result = True
+        if eligible:
+            message = re.sub(r"^\[销量预测刷新\]\s*", "", message)
+            key = record.levelno, message
+            result = key not in self.seen
+            self.seen.add(key)
+        record._diagnostic_filter_result = self, result
+        return result
+
+
+class DiagnosticCollector(logging.Handler):
+    """Keep every emitted warning/error for the user-facing build report."""
+
+    def __init__(self):
+        super().__init__()
+        self.seen = set()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.levelno >= logging.WARNING and not getattr(record, "diagnostic_continuation", False):
+            DIAGNOSTIC_COUNTS["ERROR" if record.levelno >= logging.ERROR else "WARNING"] += 1
+            message = f"{record.levelname} | {record.getMessage()}"
+            if message not in self.seen:
+                self.seen.add(message)
+                BUILD_DIAGNOSTICS.append(message)  # Only the final inventory is unique; console/file output is untouched.
+
+
+def relay_refresh_line(line: str, previous_level: int = logging.INFO) -> int:
+    """Preserve severity, strip duplicate level prefixes, and keep tracebacks as errors."""
+    text = line.rstrip("\r\n")
+    if not text:
+        return previous_level
+    prefix = re.match(r"^\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]\s*(.*)$", text)
+    continuation = False
+    if prefix:
+        level, text = getattr(logging, prefix[1]), prefix[2]
+    elif text.startswith("Traceback (most recent call last)"):
+        level, continuation = logging.ERROR, previous_level >= logging.ERROR
+    elif re.search(r":\s*\w*Warning:", text):
+        if ("openpyxl" in text and any(text.endswith(message) for message in (
+                "UserWarning: Unknown extension is not supported and will be removed",
+                "UserWarning: Conditional Formatting extension is not supported and will be removed"))):
+            extension = "条件格式扩展" if "Conditional Formatting" in text else "扩展格式"
+            LOGGER.info("[销量预测刷新] [Excel格式兼容] openpyxl不支持%s；通常不影响销量数值读取，重新保存时该扩展可能丢失，不表示原始文件已被删除或改写", extension)
+            return logging.INFO
+        level = logging.WARNING
+    else:
+        if previous_level == logging.INFO and text.strip() == "warn(msg)":
+            return previous_level  # Source-code context for the compatibility notice, not another issue.
+        level = previous_level if previous_level >= logging.WARNING else logging.INFO
+        continuation = previous_level >= logging.WARNING
+    LOGGER.log(level, "[销量预测刷新] %s", text, extra={"diagnostic_continuation": continuation})
+    return level
+
+
+def refresh_sales_forecast_data(config: dict[str, Any], input_dir: Path | None = None, output_dir: Path | None = None) -> None:
+    """Optionally rebuild the secondary forecast workbook with this Python runtime."""
+    if not config.get("refresh_sales_forecast_data_before_build", False):
+        LOGGER.info("销量预测二次处理刷新：已按 config.json 跳过")
+        return
+    script = ROOT / "tools" / "refresh_sales_forecast_data.py"
+    if not script.exists():
+        raise FileNotFoundError(f"已开启销量预测二次处理刷新，但找不到脚本：{script}")
+    LOGGER.info("销量预测二次处理刷新：开始运行 %s", script)
+    child_env = os.environ.copy()
+    child_env["PYTHONIOENCODING"] = "utf-8"
+    child_env["PYTHONUTF8"] = "1"
+    command = [sys.executable, "-u", str(script)]
+    if LOGGER.isEnabledFor(logging.DEBUG):
+        command.append("--debug")
+    if input_dir is not None:
+        command.extend(["--orders", str(input_dir.resolve())])
+    summary_path = (output_dir or PROJECT_ROOT / "output_file") / SUMMARY_NAME
+    assert_output_is_private(summary_path)
+    command.extend(["--output", str(summary_path.resolve())])
+    if config.get("forecast_as_of_date"):
+        command.extend(["--as-of-date", str(config["forecast_as_of_date"])])
+    with subprocess.Popen(
+        command,
+        cwd=script.parent,
+        env=child_env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+        encoding="utf-8",
+        errors="replace",
+    ) as process:
+        level = logging.INFO
+        for line in process.stdout:
+            level = relay_refresh_line(line, level)
+        returncode = process.wait()
+    if returncode:
+        raise RuntimeError(f"销量预测二次处理刷新失败，退出码 {returncode}")
+    LOGGER.info("销量预测二次处理刷新：完成")
+
+
+def forecast_target_names(summary_path: Path) -> list[str]:
+    """Use the refreshed forecast's own target list for subject discovery."""
+    if not summary_path.exists():
+        return []
+    workbook = load_workbook(summary_path, read_only=True, data_only=True)
+    try:
+        return visible_target_names(workbook)
+    finally:
+        workbook.close()
+
+
+class LevelFormatter(logging.Formatter):
+    """Console formatter that colors problem levels; files keep plain text."""
+
+    COLORS = {"WARNING": "\033[33m", "ERROR": "\033[31m", "CRITICAL": "\033[35m"}
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = super().format(record)
+        color = self.COLORS.get(record.levelname)
+        return f"{color}{message}\033[0m" if color else message
+
+
+def configure_runtime(output_dir: Path, debug: bool = False) -> Path:
+    """Configure UTF-8 console/file logging before any workbook is opened."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            reconfigure(encoding="utf-8", errors="replace")
+    log_dir = output_dir / "log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"generate_html_{timestamp}.log"
+    if sys.platform == "win32":
+        os.system("")  # enable ANSI colors in the Windows console
+    fmt = "%(asctime)s | %(levelname)s | %(message)s"
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(LevelFormatter(fmt, datefmt="%H:%M:%S"))
+    file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter(fmt, datefmt="%H:%M:%S"))
+    BUILD_DIAGNOSTICS.clear()
+    DIAGNOSTIC_COUNTS.update(WARNING=0, ERROR=0)
+    reset_conflict_diagnostics()
+    diagnostic_handler = DiagnosticCollector()
+    duplicate_filter = DuplicateDiagnosticFilter()
+    for handler in (console, file_handler, diagnostic_handler):
+        handler.addFilter(duplicate_filter)
+    level = logging.DEBUG if debug else logging.INFO
+    logging.disable(logging.NOTSET)
+    logging.basicConfig(
+        level=level,
+        handlers=[console, file_handler, diagnostic_handler],
+        force=True,
+    )
+    # force=True resets root handlers, not a named logger's level/disabled flag.
+    LOGGER.setLevel(level)
+    LOGGER.disabled = False
+    LOGGER.propagate = True
+    return log_file
+
+
+def serializable(value: Any) -> Any:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def split_parallel_blocks(name: str, rows: list[list]) -> list[dict[str, Any]]:
+    """Split side-by-side blocks (like SKU's 表格A/B/C) into separate tables."""
+    if len(rows) < 2:
+        return [{"name": name, "rows": rows}]
+    title_cols = [col for col, value in enumerate(rows[0]) if value not in (None, "")]
+    # 多区块:第一行有多个标题，且标题列之间至少隔一个空列，第二行在各标题列有表头
+    if len(title_cols) < 2:
+        return [{"name": name, "rows": rows}]
+    if any(right - left < 2 for left, right in zip(title_cols, title_cols[1:])):
+        return [{"name": name, "rows": rows}]
+    second = rows[1]
+    if not all(col < len(second) and second[col] not in (None, "") for col in title_cols):
+        return [{"name": name, "rows": rows}]
+    width = max(len(row) for row in rows)
+    blocks = []
+    for index, start in enumerate(title_cols):
+        end = title_cols[index + 1] if index + 1 < len(title_cols) else width
+        block_rows = []
+        for row in rows:
+            sliced = row[start:end]
+            while sliced and sliced[-1] in (None, ""):
+                sliced.pop()
+            block_rows.append(sliced)
+        if block_rows:
+            block_width = max(len(row) for row in block_rows)
+            keep = [col for col in range(block_width) if any(col < len(row) and row[col] not in (None, "") for row in block_rows)]
+            block_rows = [[row[col] if col < len(row) else None for col in keep] for row in block_rows]
+        blocks.append({"name": f"{name} · {rows[0][start]}", "rows": block_rows})
+    return blocks
+
+
+def raw_tables(store: WorkbookStore) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """按需加载的底表行块及原始 XLSX 快照；下载快照保留全部 Sheet 和格式。"""
+    files = []
+    blocks: dict[str, str] = {}
+    for file_index, item in enumerate(store.items):
+        sheets = []
+        for sheet in item.workbook.worksheets:
+            if getattr(sheet, "sheet_state", "visible") != "visible":
+                continue
+            rows_by_index, occupied = {}, set()
+            # Normal Workbook cells already implement merged-cell semantics.
+            # Do not materialize every blank cell in a sparse styled rectangle.
+            for cell in sheet._cells.values():
+                if cell.value is None:
+                    continue
+                value = format_excel_cell(cell)
+                if value not in (None, ""):
+                    rows_by_index.setdefault(cell.row, {})[cell.column] = value
+                    occupied.add(cell.column)
+            columns = sorted(occupied)
+            rows = []
+            for _, values in sorted(rows_by_index.items()):
+                last_column = max(values)
+                rows.append([
+                    values.get(column, None if column > last_column else "")
+                    for column in columns
+                ])
+            for block in split_parallel_blocks(sheet.title, rows):
+                block_rows = block["rows"]
+                # 首行是区块大标题（单值）、次行才是列名时，去掉冗余标题行让列名成为表头
+                if (
+                    len(block_rows) > 1
+                    and sum(1 for value in block_rows[0] if value not in (None, "")) <= 1
+                    and sum(1 for value in block_rows[1] if value not in (None, "")) > 1
+                ):
+                    block_rows = block_rows[1:]
+                key = f"{file_index}|{len(sheets)}"
+                blocks[key] = b64gzip(json.dumps({"rows": block_rows}, ensure_ascii=False, separators=(",", ":")))
+                sheets.append({
+                    "name": block["name"],
+                    "total_rows": len(block_rows),
+                    "total_cols": max((len(row) for row in block_rows), default=0),
+                    "source_sheet": sheet.title,
+                })
+        file_info = {"name": item.path.name, "sheets": sheets}
+        # Embed the original file once, not a CSV reconstruction of the split
+        # display blocks. This also works when the HTML is copied elsewhere or
+        # opened offline, and preserves formulas, merged cells and hidden tabs.
+        try:
+            workbook_bytes = item.path.read_bytes()
+        except OSError as exc:
+            LOGGER.warning("底表整表导出不可用: %s | %s", item.path.name, exc)
+        else:
+            workbook_key = f"{file_index}|xlsx"
+            blocks[workbook_key] = base64.b64encode(workbook_bytes).decode("ascii")
+            file_info["workbook_key"] = workbook_key
+        files.append(file_info)
+    return files, blocks
+
+
+def build(
+    input_dir: Path, output_file: Path, *, disable_sales_forecast: bool = False
+) -> tuple[dict[str, Any], list[str]]:
+    build_started = perf_counter()
+    assert_output_is_private(output_file)
+    LOGGER.info("开始生成独立销量预测看板")
+    LOGGER.info("输入目录: %s", input_dir)
+    LOGGER.info("输出文件: %s", output_file)
+    config = load_config(ROOT / "config.json")
+    if disable_sales_forecast:
+        config["refresh_sales_forecast_data_before_build"] = False
+        LOGGER.info("销量预测：已按本次运行参数禁用，导航保留置灰，跳过预测刷新及计算")
+    if config.get("chart_render_mode") not in {"original", "generated"}:
+        raise ValueError("config.json 的 chart_render_mode 必须是 original 或 generated")
+    if date.today().year not in PUBLISHED_YEARS:
+        LOGGER.warning(
+            "[日历校验] %d年中国法定节假日数据尚未维护；预测日期将仅按自然周判断工作日/周末",
+            date.today().year,
+        )
+    manifest_mode = config.get("build_manifest_mode", "compact")
+    if manifest_mode not in {"compact", "full", "off"}:
+        raise ValueError("config.json 的 build_manifest_mode 必须是 compact、full 或 off")
+    stage_started = perf_counter()
+    refresh_sales_forecast_data(config, input_dir, output_file.parent)
+    refresh_seconds = perf_counter() - stage_started
+    summary_path = output_file.parent / SUMMARY_NAME
+    cache_dir = output_file.parent / ".cache" / "excel"
+    store = WorkbookStore(input_dir, cache_dir=cache_dir)
+    stage_started = perf_counter()
+    raw_only_names = (SUMMARY_NAME, FORECAST_SOURCE_PATH.name)
+    store.load(exclude_names=set(raw_only_names), data_only_view=config.get("chart_render_mode") == "generated")
+    load_seconds = perf_counter() - stage_started
+    if not store.items:
+        details = "；".join(store.load_errors) if store.load_errors else "目录中没有xlsx文件"
+        raise RuntimeError(f"没有成功读取任何Excel，无法生成看板：{details}")
+    try:
+        stage_started = perf_counter()
+        subjects = discover_subjects(store, forecast_target_names(summary_path))
+        discovery_seconds = perf_counter() - stage_started
+        LOGGER.info("已识别分析主体 %d 个", len(subjects))
+        LOGGER.debug("分析主体明细: %s", "、".join(subject.name for subject in subjects))
+        dashboards: dict[str, Any] = {}
+        capabilities: dict[str, set[str]] = {}
+        runtime_warnings = list(store.load_errors)
+        module_seconds: dict[str, float] = defaultdict(float)
+        module_builds: dict[str, int] = defaultdict(int)
+        for module in MODULES:
+            if module.id == "sales_forecast":
+                module.summary_path = summary_path
+            set_config = getattr(module, "set_config", None)
+            if set_config:
+                set_config(config)
+        for subject in subjects:
+            matched_modules = []
+            for module in MODULES:
+                if disable_sales_forecast and module.id == "sales_forecast":
+                    continue
+                if hasattr(module, "set_dashboards"):
+                    module.set_dashboards(dashboards)
+                module_started = perf_counter()
+                try:
+                    dashboard = module.build(store, subject)
+                except Exception as exc:
+                    message = f"模块生成失败: 主体={subject.name}, 模块={module.label}, 错误={exc}"
+                    runtime_warnings.append(message)
+                    LOGGER.exception(message)
+                    continue
+                finally:
+                    module_seconds[module.label] += perf_counter() - module_started
+                    module_builds[module.label] += 1
+                if not dashboard:
+                    continue
+                dashboards[f"{subject.id}|{module.id}"] = store.resolve_dashboard_sources(dashboard).to_dict()
+                capabilities.setdefault("".join(subject.name.split()), set()).add(module.id)
+                matched_modules.append(module.label)
+            LOGGER.debug("主体映射完成: %s -> %s", subject.name, "、".join(matched_modules) if matched_modules else "仅底表")
+        configured_order = config.get("module_order") or []
+        known_modules = {module.id for module in MODULES} | {"raw"}
+        unknown_modules = [module for module in configured_order if module not in known_modules]
+        if unknown_modules:
+            LOGGER.warning("[\u914d\u7f6e\u6821\u9a8c] module_order \u5305\u542b\u672a\u77e5\u6a21\u5757: %s", "\u3001".join(unknown_modules))
+        missing_modules = [module.id for module in MODULES if module.id not in configured_order]
+        if missing_modules:
+            LOGGER.warning("[\u914d\u7f6e\u6821\u9a8c] module_order \u672a\u914d\u7f6e\u5df2\u6ce8\u518c\u6a21\u5757: %s", "\u3001".join(missing_modules))
+        set_capabilities(subjects, capabilities, configured_order)
+        add_kpi_comparisons(dashboards)
+        if store.multi_source_groups:
+            LOGGER.info("多文件来源：%d类，共%d个文件匹配项参与合并；详细文件名可使用 --debug 查看",
+                        len(store.multi_source_groups), sum(store.multi_source_groups.values()))
+        stage_started = perf_counter()
+        # Forecast source/summary sheets belong in the raw center, but must not
+        # create ordinary analysis subjects or feed unrelated dashboard modules.
+        for raw_path in (input_dir / FORECAST_SOURCE_PATH.name, summary_path):
+            if raw_path.exists() and all(item.path.resolve() != raw_path.resolve() for item in store.items):
+                store.items.append(WorkbookItem(raw_path, load_data_workbook(raw_path, cache_dir)))
+        raw_files, raw_blocks = raw_tables(store)
+        raw_seconds = perf_counter() - stage_started
+        manifest = {
+            "meta": {
+                "title": config["title"],
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "input_dir": str(input_dir),
+            },
+            "config": config,
+            "subjects": [subject.to_dict() for subject in subjects],
+            "dashboards": dashboards,
+            "chart_assets": store.chart_assets,
+            "raw_files": raw_files,
+            "raw_blocks": raw_blocks,
+        }
+        validation_started = perf_counter()
+        validation_warnings = validate_manifest(manifest)
+        for warning in validation_warnings:
+            LOGGER.warning("[生成校验] %s", warning)
+        validation_seconds = perf_counter() - validation_started
+        LOGGER.info("开始写入 HTML（主体 %d 个，看板 %d 个）", len(subjects), len(dashboards))
+        stage_started = perf_counter()
+        page = forecast_manifest(manifest, forecast_disabled=disable_sales_forecast)
+        if page["dashboards"]:
+            page["raw_block_urls"] = write_raw_block_assets(raw_blocks, output_file)
+        render_dashboard(page, ROOT / "templates", output_file)
+        LOGGER.info("独立销量预测看板: %s（发布时保留 forecast_assets 目录）", output_file)
+        render_seconds = perf_counter() - stage_started
+        output_size = output_file.stat().st_size
+        LOGGER.info("生成HTML体积: %.1fMB", output_size / 1024 / 1024)
+        if output_size > 35 * 1024 * 1024:
+            LOGGER.warning("[性能校验] 单HTML超过35MB，建议优先拆分大底表或图表资源")
+        emitted_messages = "\n".join(BUILD_DIAGNOSTICS)
+        warnings = list(dict.fromkeys([
+            *BUILD_DIAGNOSTICS,
+            *(f"WARNING | {message}" for message in runtime_warnings if message not in emitted_messages),
+        ]))
+        stage_started = perf_counter()
+        manifest_path = output_file.parent / "build_manifest.json"
+        if manifest_mode != "off":
+            with manifest_path.open("w", encoding="utf-8") as handle:
+                if manifest_mode == "full":
+                    json.dump(manifest, handle, ensure_ascii=False, indent=2)
+                else:
+                    json.dump(manifest, handle, ensure_ascii=False, separators=(",", ":"))
+            LOGGER.info(
+                "构建清单: %s 模式，%.1fMB",
+                manifest_mode,
+                manifest_path.stat().st_size / 1024 / 1024,
+            )
+        else:
+            if manifest_path.exists():
+                manifest_path.unlink()
+            LOGGER.info("构建清单: 已按 config.json 跳过（旧清单已清理，避免误读过期数据）")
+        legacy_warning_file = output_file.parent / "build_warnings.log"
+        if legacy_warning_file.exists():
+            legacy_warning_file.unlink()
+        manifest_seconds = perf_counter() - stage_started
+        if warnings:
+            LOGGER.info("诊断完成：WARNING %d条，ERROR %d条；问题记录%d条；相同问题不重复打印，冲突按完整范围合并",
+                        DIAGNOSTIC_COUNTS["WARNING"], DIAGNOSTIC_COUNTS["ERROR"], len(warnings))
+        else:
+            LOGGER.info("校验完成：没有发现警告")
+        module_summary = "；".join(
+            f"{label} {seconds:.2f}s/{module_builds[label]}次"
+            for label, seconds in sorted(module_seconds.items(), key=lambda item: item[1], reverse=True)
+        )
+        LOGGER.info("模块耗时: %s", module_summary)
+        LOGGER.info(
+            "性能汇总: 预测刷新 %.2fs | Excel加载 %.2fs | 主体识别 %.2fs | 模块生成 %.2fs | "
+            "底表整理 %.2fs | 数据校验 %.2fs | HTML输出 %.2fs | 清单/诊断 %.2fs | 其他编排 %.2fs | 总计 %.2fs",
+            refresh_seconds,
+            load_seconds,
+            discovery_seconds,
+            sum(module_seconds.values()),
+            raw_seconds,
+            validation_seconds,
+            render_seconds,
+            manifest_seconds,
+            perf_counter() - build_started - sum((refresh_seconds, load_seconds, discovery_seconds, sum(module_seconds.values()), raw_seconds, validation_seconds, render_seconds, manifest_seconds)),
+            perf_counter() - build_started,
+        )
+        return manifest, warnings
+    finally:
+        store.close()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate the independent HarmonyOS Auto sales forecast.")
+    parser.add_argument("--input", type=Path, default=orders_input_directory(PROJECT_ROOT))
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=PROJECT_ROOT / "output_file" / "鸿蒙智行销量预测.html",
+    )
+    parser.add_argument("--check", action="store_true", help="Return a non-zero exit code when validation warnings exist.")
+    parser.add_argument("--no-open", action="store_true", help="Generate the HTML without opening the default browser.")
+    parser.add_argument("--debug", action="store_true", help="输出调试日志，用于排查数据解析问题。")
+    parser.add_argument(
+        "--disable-sales-forecast",
+        action="store_true",
+        help="仅本次生成禁用销量预测，保留置灰导航，并跳过预测汇总刷新及预测计算。",
+    )
+    return parser.parse_args()
+
+
+def cleanup_input_cache(output_dir: Path) -> None:
+    """Remove only this output directory's private cache after the run."""
+    assert_output_is_private(output_dir / ".cache")
+    cache_dir = output_dir / ".cache"
+    try:
+        output_root = output_dir.resolve()
+        cache_dir = output_root / ".cache"
+        if not cache_dir.exists() and not cache_dir.is_symlink():
+            return
+        # Do not follow a symlink/junction or remove an unexpected file.
+        if cache_dir.is_symlink() or cache_dir.resolve() != cache_dir or not cache_dir.is_dir():
+            LOGGER.warning("缓存清理已跳过：不是输出目录内的普通 .cache 文件夹：%s", cache_dir)
+            return
+        shutil.rmtree(cache_dir)
+        LOGGER.info("已清理运行缓存: %s", cache_dir)
+    except OSError as exc:
+        LOGGER.warning("运行缓存未能清理: %s（%s）；可在文件占用结束后手动删除", cache_dir, exc)
+
+
+def main() -> int:
+    args = parse_args()
+    assert_output_is_private(args.output)
+    log_file = configure_runtime(args.output.parent, args.debug)
+    try:
+        manifest, warnings = build(
+            args.input, args.output, disable_sales_forecast=args.disable_sales_forecast
+        )
+    except Exception:
+        LOGGER.exception("生成失败，请根据上方错误和日志排查")
+        LOGGER.error("运行日志: %s", log_file)
+        return 1
+    finally:
+        cleanup_input_cache(args.output.parent)
+    errors = DIAGNOSTIC_COUNTS["ERROR"]
+    if errors:
+        LOGGER.error("生成不完整：发生%d条错误；已保留可用HTML供排查，不自动打开: %s",
+                     errors, args.output, extra={"diagnostic_continuation": True})
+    else:
+        LOGGER.info("生成成功: %s", args.output)
+    LOGGER.info("汇总: 主体=%d，看板=%d, 问题=%d", len(manifest["subjects"]), len(manifest["dashboards"]), len(warnings))
+    LOGGER.info("运行日志: %s", log_file)
+    if errors:
+        return 1
+    if AUTO_OPEN_HTML and not args.no_open:
+        try:
+            if sys.platform == "win32":
+                os.startfile(args.output)  # 用系统默认应用打开
+                opened = True
+            else:
+                opened = webbrowser.open(args.output.resolve().as_uri())
+            if opened:
+                LOGGER.info("已调用系统默认应用打开看板")
+            else:
+                LOGGER.warning("系统没有确认看板已打开，请手动打开: %s", args.output)
+        except Exception:
+            LOGGER.exception("自动打开看板失败，请手动打开HTML")
+    return 1 if args.check and warnings else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

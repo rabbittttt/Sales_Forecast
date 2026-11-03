@@ -1,0 +1,319 @@
+from __future__ import annotations
+
+import re
+import math
+import logging
+from datetime import date, datetime
+
+from openpyxl.utils.datetime import from_excel
+
+from core.components import kpi, section, table
+from core.excel import WorkbookStore, cell_number, clean_text, display_period, safe_rate
+from core.models import Dashboard, SourceRef, Subject
+from core.excel import sheet_subject
+from core.model_identity import stage_label
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _hourly_timestamp(cell) -> datetime | None:
+    """Read the actual clock time; Hn is a column sequence, not an hour of day."""
+    value = cell.value
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            timestamp = from_excel(value, epoch=cell.parent.parent.epoch)
+            return timestamp if isinstance(timestamp, datetime) else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+    text = clean_text(value).replace('年', '-').replace('月', '-').replace('日', ' ').replace('：', ':')
+    match = re.fullmatch(
+        r'(\d{4}|\d{2})[-/.](\d{1,2})[-/.](\d{1,2})[ T]+(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.\d+)?)?', text,
+    )
+    if match:
+        year, month, day, hour, minute, second = (int(part or 0) for part in match.groups())
+        try:
+            return datetime(year + 2000 if year < 100 else year, month, day, hour, minute, second)
+        except ValueError:
+            pass
+    return None
+
+
+def _phase_number(sheet_name: str) -> int | None:
+    match = re.search(r"第\s*(\d+)\s*期", sheet_name)
+    return int(match.group(1)) if match else None
+
+
+def _date_label(cell) -> str:
+    value = cell.value
+    if isinstance(value, (datetime, date)):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, (int, float)):
+        try:
+            return from_excel(value, epoch=cell.parent.parent.epoch).strftime("%Y-%m-%d")
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return display_period(value, cell.number_format).split(" ", 1)[0]
+
+
+def _read_hourly(sheet) -> tuple[list[dict], str]:
+    rows: list[dict] = []
+    start_label = ""
+    invalid_times = []
+    metric_rows = {
+        clean_text(sheet.cell(row, 1).value): row
+        for row in range(3, sheet.max_row + 1)
+        if clean_text(sheet.cell(row, 1).value)
+    }
+    for col in range(2, sheet.max_column + 1):
+        time_cell = sheet.cell(2, col)
+        time_value = time_cell.value
+        if time_value in (None, "") or clean_text(time_value) in ("总计", "合计"):
+            continue
+        timestamp = _hourly_timestamp(time_cell)
+        if timestamp is None:
+            invalid_times.append(f"{time_cell.coordinate}={clean_text(time_value)}")
+            continue
+        period, hour = timestamp.strftime("%Y-%m-%d"), timestamp.hour
+        timestamp_label = timestamp.strftime("%Y-%m-%d %H:%M")
+        start_label = start_label or timestamp_label
+
+        def metric(*names: str) -> float:
+            row = next((metric_rows[name] for name in names if name in metric_rows), None)
+            return cell_number(sheet.cell(row, col)) if row else 0.0
+
+        rows.append({
+            "period": period, "hour": hour,
+            "orders": metric("当日大定数量"), "net": metric("当日留存大定数量", "当日净大定数量"),
+            "small": metric("当日小订转大定数量"), "direct": metric("当日直接大定数量"),
+            "lock": metric("当日交车锁单数量"),
+        })
+    if invalid_times:
+        LOGGER.warning(
+            "[首销分时时间校验] Sheet=%s | 时间缺少小时或无法解析=%d列 | 示例=%s | "
+            "处理=相关列不参与分时图，不用H编号或列位置猜测小时；请核对时间行",
+            sheet.title, len(invalid_times), "；".join(invalid_times[:3]),
+        )
+    return rows, start_label
+
+
+class LaunchRhythmModule:
+    id = "launch_rhythm"
+    label = "首销节奏"
+
+    def build(self, store: WorkbookStore, subject: Subject) -> Dashboard | None:
+        views = {}
+        sources: list[SourceRef] = []
+        hourly_matches = store.find_subject_sheets("首销期订单节奏", subject.name, "hour")
+        for grain in ("day", "week"):
+            matches = store.find_subject_sheets("首销期订单节奏", subject.name, grain)
+            if not matches:
+                continue
+            matches.sort(key=lambda found: (_phase_number(found[1].title) is None, _phase_number(found[1].title) or 0))
+            phases = []
+            for index, (item, sheet) in enumerate(matches, start=1):
+                phase_number = _phase_number(sheet.title)
+                campaign_label = stage_label(sheet_subject(sheet.title), subject.name)
+                hourly = next((found for found in hourly_matches if sheet_subject(found[1].title) == sheet_subject(sheet.title)), None) if campaign_label else self._matching_hourly(hourly_matches, phase_number, len(matches))
+                phase = self._build_phase(item, sheet, phase_number or index, hourly, len(matches) > 1 or phase_number is not None, campaign_label, grain=grain)
+                if phase:
+                    phases.append(phase)
+                    sources.extend(phase["sources"])
+            if not phases:
+                continue
+            phases.sort(key=lambda phase: phase.get("start_date") or "")
+            if len(phases) == 1:
+                phase = phases[0]
+                views[grain] = {"periods": [phase["selector_label"] if phase.get("campaign_label") else phase["period_label"]], "default_period": phase["selector_label"] if phase.get("campaign_label") else phase["period_label"], "pages": {(phase["selector_label"] if phase.get("campaign_label") else phase["period_label"]): phase["page"]}}
+                continue
+            pages = {"全部阶段": self._combined_page(phases)}
+            pages.update({phase["selector_label"]: phase["page"] for phase in phases})
+            selectors = ["全部阶段", *[phase["selector_label"] for phase in phases]]
+            views[grain] = {"periods": selectors, "default_period": phases[-1]["selector_label"], "pages": pages}
+
+        unique_sources: list[SourceRef] = []
+        seen = set()
+        for source in sources:
+            key = (source.file, source.sheet, source.note)
+            if key not in seen:
+                seen.add(key)
+                unique_sources.append(source)
+        return Dashboard(self.id, subject.id, views, unique_sources) if views else None
+
+    @staticmethod
+    def _matching_hourly(hourly_matches, phase_number: int | None, phase_count: int):
+        if phase_number is not None:
+            return next((found for found in hourly_matches if _phase_number(found[1].title) == phase_number), None)
+        return hourly_matches[0] if phase_count == 1 and hourly_matches else None
+
+    def _build_phase(self, item, sheet, phase_number: int, hourly, show_phase: bool, campaign_label: str = "", grain: str = "day") -> dict | None:
+        source = SourceRef(item.path.name, sheet.title, "首销期订单节奏")
+        period_columns = [col for col in range(2, sheet.max_column + 1) if clean_text(sheet.cell(1, col).value) and clean_text(sheet.cell(1, col).value) != "总计"]
+        periods = [clean_text(sheet.cell(1, col).value) for col in period_columns]
+        if not periods:
+            return None
+        metrics = {}
+        for row in range(3, sheet.max_row + 1):
+            label = clean_text(sheet.cell(row, 1).value)
+            if label:
+                is_rate = "率" in label or "进度" in label or "占比" in label
+                display_label = label.replace("净大定", "留存大定")
+                values = [None if isinstance(sheet.cell(row, col).value, bool) else
+                          cell_number(sheet.cell(row, col), rate=is_rate, default=None) for col in period_columns]
+                metrics[display_label] = [value if isinstance(value, (int, float)) and math.isfinite(value) else None
+                                          for value in values]
+        def quantity(index, *names):
+            for name in names:
+                values = metrics.get(name, [])
+                value = values[index] if index < len(values) else None
+                if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                        and math.isfinite(value) and value >= 0):
+                    return value
+            return None
+
+        def share(numerator, denominator):
+            if numerator is None or denominator is None or denominator <= 0:
+                return None
+            value = numerator / denominator
+            return value if math.isfinite(value) else None
+
+        daily_shares, cumulative_shares, cumulative_pairs = [], [], []
+        for index in range(len(periods)):
+            daily_shares.append(share(quantity(index, "当日直接大定数量"),
+                                      quantity(index, "当日大定数量")))
+            direct = quantity(index, "累计直接大定数量")
+            gross = quantity(index, "累计总大定数量", "累计大定数量")
+            if gross is None and direct is not None:
+                small = quantity(index, "累计小订转大定数量", "累计小订转大数量")
+                gross = small + direct if small is not None else None
+                if gross is not None and not math.isfinite(gross):
+                    gross = None
+            cumulative_pairs.append((direct, gross))
+            cumulative_shares.append(share(direct, gross))
+        # Quantities own these shares; an old completion-progress row or a
+        # maintained share cannot silently replace its matching denominator.
+        metrics["每日直接大定占比"] = daily_shares
+        metrics["累计直接大定占比"] = cumulative_shares
+        share_index = next((index for index in reversed(range(len(periods)))
+                            if cumulative_shares[index] is not None), None)
+        direct_share = cumulative_shares[share_index] if share_index is not None else None
+        pair_index = share_index
+        if pair_index is None:
+            # An explicitly empty phase has known quantities for a multi-phase
+            # sum even though its individual 0/0 share is undefined.
+            pair_index = next((index for index in reversed(range(len(periods)))
+                               if cumulative_pairs[index] == (0, 0)), None)
+        direct_share_numerator, direct_share_denominator = (
+            cumulative_pairs[pair_index] if pair_index is not None else (None, None))
+
+        date_labels = [_date_label(sheet.cell(2, col)) for col in period_columns]
+        date_labels = [label for label in date_labels if label]
+        start_date = date_labels[0] if date_labels else ""
+        end_date = date_labels[-1] if date_labels else periods[-1]
+
+        def latest(*names: str) -> float:
+            # A known zero keeps the primary row's priority over legacy aliases.
+            return next((value for name in names for value in reversed(metrics.get(name, []))
+                         if value is not None), 0)
+
+        cumulative_order = sum(value for value in metrics.get("当日大定数量", []) if value is not None)
+        cumulative_net = sum(value for value in metrics.get("当日留存大定数量", []) if value is not None)
+        cumulative_lock = next((value for value in reversed(metrics.get("累计交车锁单数量", []))
+                                if value is not None), None)
+        cumulative_small = latest("累计小订转大定数量", "累计小订转大数量")
+        cumulative_small_rate = latest("累计小订转化率", "累计小转大率")
+        cumulative_small_base = safe_rate(cumulative_small, cumulative_small_rate) if cumulative_small_rate > 0 else 0
+        cumulative_direct = latest("累计直接大定数量")
+        source_note = f"{'当周' if grain == 'week' else '当日'}直接大定 / {'当周' if grain == 'week' else '当日'}小订转大 · 数量不累计，小转大率和直接大定占比为累计口径"
+        matrix_rows = [[("当周直接大定占比" if grain == "week" and name == "每日直接大定占比" else name),
+                        *[f"{value * 100:.1f}%" if value is not None and any(word in name for word in ("率", "进度", "占比"))
+                          else value for value in values]] for name, values in metrics.items()]
+        page = {
+            "kpis": [
+                kpi("累计大定", cumulative_order, "单", periods[-1], "blue"),
+                kpi("累计锁单", cumulative_lock, "单", "累计交车锁单", "green"),
+                kpi("累计小转大率", cumulative_small_rate * 100, "%", "累计小转大 ÷ 总小订", "purple"),
+                kpi("累计直接大定占比", direct_share * 100 if direct_share is not None else None,
+                    "%", "累计直接大定 ÷ 累计总大定", "blue"),
+            ],
+            "sections": [
+                section("launch_composite", f"{campaign_label or f'第{phase_number}期'} · 首销订单来源" if show_phase else "首销订单来源", {"periods": periods, "metrics": metrics, "grain": grain}, f"{start_date or '日期缺失'} 至 {end_date or '日期缺失'} · {source_note}" if show_phase else source_note, source=source),
+                section("matrix", f"{campaign_label or f'第{phase_number}期'} · 完整指标" if show_phase else "首销期完整指标", table(["首销指标", *periods], matrix_rows), f"全部 {len(metrics)} 项指标 × {len(periods)} 个周期", source=source),
+            ],
+        }
+        phase_sources = [source]
+        if hourly:
+            hourly_item, hourly_sheet = hourly
+            hourly_rows, hourly_start = _read_hourly(hourly_sheet)
+            if hourly_rows:
+                hourly_source = SourceRef(hourly_item.path.name, hourly_sheet.title, "分时首销节奏")
+                hourly_meta = (f"首销开启 {hourly_start} · 仅对应{campaign_label or f'第{phase_number}期'}" if hourly_start else f"仅对应{campaign_label or f'第{phase_number}期'}") if show_phase else (f"首销开启 {hourly_start} · 识别高峰时段与大定波动" if hourly_start else "识别高峰时段与大定波动")
+                page["sections"].insert(1, section("launch_hourly", f"{campaign_label or f'第{phase_number}期'} · 分时首销节奏" if show_phase else "分时首销节奏", hourly_rows, hourly_meta, source=hourly_source))
+                phase_sources.append(hourly_source)
+        range_label = f"{start_date}—{end_date}" if start_date and end_date else end_date
+        return {
+            "phase": phase_number, "campaign_label": campaign_label, "start_date": start_date, "end_date": end_date,
+            "period_label": end_date or periods[-1],
+            "selector_label": f"{campaign_label or f'第{phase_number}期'} · {range_label}" if range_label else f"{campaign_label or f'第{phase_number}期'}",
+            "days": len(periods), "orders": cumulative_order, "net": cumulative_net, "lock": cumulative_lock,
+            "small": cumulative_small, "small_rate": cumulative_small_rate,
+            "small_base": cumulative_small_base, "direct": cumulative_direct, "direct_share": direct_share,
+            "direct_share_numerator": direct_share_numerator, "direct_share_denominator": direct_share_denominator,
+            "page": page, "metrics": metrics, "periods": periods, "grain": grain,
+            "source": source, "sources": phase_sources,
+        }
+
+    @staticmethod
+    def _combined_page(phases: list[dict]) -> dict:
+        total_orders = sum(phase["orders"] for phase in phases)
+        total_lock = sum(phase["lock"] for phase in phases) if all(phase["lock"] is not None for phase in phases) else None
+        total_small = sum(phase["small"] for phase in phases)
+        share_pairs = [(phase.get("direct_share_numerator"), phase.get("direct_share_denominator"))
+                       for phase in phases]
+        combined_direct_share = None
+        if all(numerator is not None and denominator is not None for numerator, denominator in share_pairs):
+            direct_total = sum(numerator for numerator, _ in share_pairs)
+            gross_total = sum(denominator for _, denominator in share_pairs)
+            if math.isfinite(direct_total) and math.isfinite(gross_total) and gross_total > 0:
+                combined_direct_share = direct_total / gross_total
+        comparable_phases = [phase for phase in phases if phase["small_base"] > 0]
+        combined_small_rate = safe_rate(
+            sum(phase["small"] for phase in comparable_phases),
+            sum(phase["small_base"] for phase in comparable_phases),
+        )
+        summary_rows = []
+        for index, phase in enumerate(phases):
+            gap: int | str = "—"
+            if index and phases[index - 1]["end_date"] and phase["start_date"]:
+                try:
+                    previous = datetime.strptime(phases[index - 1]["end_date"], "%Y-%m-%d").date()
+                    current = datetime.strptime(phase["start_date"], "%Y-%m-%d").date()
+                    gap = max((current - previous).days - 1, 0)
+                except ValueError:
+                    pass
+            summary_rows.append([phase.get("campaign_label") or f"第{phase['phase']}期", phase["start_date"] or "日期缺失", phase["end_date"] or "日期缺失", phase["days"], gap, phase["orders"], phase["net"], phase["direct_share"]])
+        sections = [section(
+            "table", "阶段概览",
+            table(["阶段", "开始日期", "结束日期", "周期数", "距上期空档(天)", "累计大定", "累计留存大定", "累计直接大定占比"], summary_rows,
+                  formats=["text", "text", "text", "number", "number", "number", "number", "percent"]),
+            "按绝对日期展示阶段边界；空档不计为0，也不参与趋势连线", source=phases[0]["source"],
+        )]
+        for phase in phases:
+            sections.append(section(
+                "launch_composite", (phase.get("campaign_label") or f"第{phase['phase']}期") + " · 首销订单来源",
+                {"periods": phase["periods"], "metrics": phase["metrics"], "grain": phase["grain"]},
+                f"{phase['start_date'] or '日期缺失'} 至 {phase['end_date'] or '日期缺失'} · {'当周' if phase['grain'] == 'week' else '当日'}来源，数量不累计，比例仍累计 · 与其他期次断开显示",
+                source=phase["source"],
+            ))
+        return {
+            "kpis": [
+                kpi("多期累计大定", total_orders, "单", f"共{len(phases)}期", "blue"),
+                kpi("多期累计锁单", total_lock, "单", f"共{len(phases)}期 · 累计交车锁单", "green"),
+                kpi("多期小转大率", combined_small_rate * 100, "%", "按各期总小订加权计算", "purple"),
+                kpi("累计直接大定占比", combined_direct_share * 100 if combined_direct_share is not None else None,
+                    "%", "各期累计直接数量合计 ÷ 各期累计总大定合计", "blue"),
+            ],
+            "sections": sections,
+        }

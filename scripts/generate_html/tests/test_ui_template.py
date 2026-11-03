@@ -1,0 +1,1166 @@
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+import unittest
+from pathlib import Path
+
+from core.config import load_config
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class DashboardTemplateTests(unittest.TestCase):
+    def test_reused_number_formatter_preserves_existing_display(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node unavailable')
+        script = (ROOT / 'templates/dashboard.js').read_text(encoding='utf-8')
+        formatter = script[script.index('  const displayText ='):script.index('  const colors =')]
+        checks = r'''
+const assert=require('assert');
+const values=[0,-0,NaN,Infinity,-Infinity,1.05,-1.05,1234567.89,Number.MAX_VALUE,Number.MIN_VALUE];
+for(let i=-1000;i<=1000;i++)values.push(i/13);
+for(const value of values)assert.strictEqual(fmt(value),value.toLocaleString('zh-CN',{maximumFractionDigits:1}));
+assert.strictEqual(fmt('<净大定>'),'&lt;留存大定&gt;');
+assert.strictEqual(fmt(null),'');
+'''
+        subprocess.run([node, '-e', formatter + checks], check=True, capture_output=True)
+
+    def test_sku_unknown_values_are_distinct_from_real_zero(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node unavailable")
+        script = (ROOT / "templates/dashboard.js").read_text(encoding="utf-8")
+        runtime = script[script.index("  const displayText ="):script.index("  const RHYTHM_LAYOUT=")]
+        runtime += script[script.index("  function renderSkuHeatmap("):script.index("  function renderComboHeatmap(")]
+        runtime += script[script.index("  function renderComboMatrix("):script.index("  function cumulative(")]
+        runtime += script[script.index("  function renderColumns("):script.index("  function renderCancelCards(")]
+        checks = r'''
+const assert=require('assert'),values=[null,0,.25,NaN,Infinity,undefined],original=[...values],periods=values.map((_,index)=>'W'+index);
+const data={groups:[{name:'外饰组合',periods,rows:[{rank:'TOP1',label:'黑色',values}]}]},matrix=renderComboMatrix(data);
+const cells=[...matrix.matchAll(/<div class="combo-matrix-cell"([^>]*)>(.*?)<\/div>/g)];
+assert.equal(cells.length,values.length);
+assert.deepEqual(cells.map(cell=>cell[2].replace(/<[^>]*>/g,'')),['—','0.0%','25.0%','—','—','—']);
+for(const index of [0,3,4,5])assert(!cells[index][1].includes('background'),'unknown ratio must not receive a numeric heat color');
+assert(cells[1][1].includes('background'),'real zero remains a known heatmap value');
+const heat=renderSkuHeatmap({periods,rows:[{label:'TOP1',values}]});
+assert.equal((heat.match(/>—<\/div>/g)||[]).length,4);assert(heat.includes('>0.0%</div>'));
+const tailRows=[{label:'未知',value:null},{label:'真实零',value:0},{label:'已知',value:5},{label:'非有限',value:Infinity}],tail=renderTailDistribution(tailRows);
+assert.deepEqual([...tail.matchAll(/class="column-data-label"[^>]*>([^<]*)<\/b>/g)].map(match=>match[1]),['—','0','5','—']);
+const positiveHeight=html=>[...html.matchAll(/height:([\d.]+)%/g)].map(match=>Number(match[1])).filter(height=>height>0);
+assert.deepEqual(positiveHeight(tail),positiveHeight(renderTailDistribution([{label:'已知',value:5}])),'unknown counts must not alter the numeric scale');
+assert.deepEqual(values,original);assert.equal(tailRows[0].value,null);assert.equal(tailRows[1].value,0);
+assert(!matrix.includes('NaN')&&!matrix.includes('Infinity')&&!tail.includes('NaN')&&!tail.includes('Infinity'));
+'''
+        subprocess.run([node, "-e", runtime + checks], check=True, capture_output=True)
+
+    @staticmethod
+    def rhythm_runtime():
+        script = (ROOT / "templates/dashboard.js").read_text(encoding="utf-8")
+        helpers = script[script.index("  const displayText ="):script.index("  function avoidLabelY(")]
+        adapters = script[script.index("  function renderLaunch(data){"):script.index("  function renderColumns(rows,color){")]
+        return helpers + adapters
+
+    def test_launch_chart_keeps_blank_gaps_and_real_zero(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node unavailable')
+        data = "{periods:['D1','D2','D3','D4'],metrics:{'当日小订转大定数量':[20,null,40,0],'当日直接大定数量':[60,null,160,0],'累计小订转大定数量':[999,999,999,999],'累计直接大定数量':[9999,9999,9999,9999],'累计小订转化率':[.1,null,.2,0]}}"
+        result = subprocess.run([node, '-e', self.rhythm_runtime() + 'process.stdout.write(renderLaunch(' + data + '));'],
+                                text=True, encoding='utf-8', capture_output=True, check=True)
+        self.assertEqual(result.stdout.count('<circle'), 3)
+        self.assertEqual(result.stdout.count('<rect data-rhythm-bar='), 6)
+        self.assertIn('>0</text>', result.stdout)
+        self.assertIn('尚未更新或不完整', result.stdout)
+        self.assertIn('D3 · 当日直接大定 160 · 当日小订转大 40 · 来源合计 200', result.stdout)
+        self.assertIn('累计小转大率（累计小转大÷总小订）', result.stdout)
+        self.assertIn('>20.0%</text>', result.stdout)
+        self.assertNotIn('>999</text>', result.stdout)
+        self.assertNotIn('>9999</text>', result.stdout)
+        path = re.search(r'<path[^>]*\bd="([^"]*)"', result.stdout)[1]
+        self.assertEqual(path.count('M'), 2)
+        self.assertEqual(path.count('L'), 1)
+        self.assertNotIn('NaN', result.stdout)
+
+    def test_launch_sources_only_use_current_period_and_do_not_fill_unknown_with_zero(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node unavailable')
+        checks = r'''
+const assert=require('assert');
+const metrics={'当日大定数量':[100,50,30],'当日小订转大数量':[40,null,10]},original=JSON.stringify(metrics);
+const html=renderLaunch({periods:['D1','D2','D3'],metrics});
+assert(html.includes('D1 · 当日直接大定 60 · 当日小订转大 40 · 来源合计 100'));
+assert(html.includes('D3 · 当日直接大定 20 · 当日小订转大 10 · 来源合计 30'));
+assert.equal((html.match(/<rect data-rhythm-bar=/g)||[]).length,4);
+assert.equal((html.match(/<title>[^<]*尚未更新或不完整/g)||[]).length,1);
+assert.equal(JSON.stringify(metrics),original,'display renderer must not change metrics');
+for(const missing of [{'累计直接大定数量':[100],'累计小订转大数量':[40]}, {'当日大定数量':[100]}]){
+ const unavailable=renderLaunch({periods:['D1'],metrics:missing});
+ assert(!unavailable.includes('<rect data-rhythm-bar='));assert(unavailable.includes('尚未更新或不完整'));
+}
+const week=renderLaunch({periods:['W1','W2','W3'],metrics,grain:'week'});
+assert(week.includes('当周直接大定'));assert(!week.includes('当日'));assert(!week.includes('累计直接大定</span>'));
+const rates=renderLaunch({periods:['D1','D2'],metrics:{'当日小订转大数量':[10,10],'当日直接大定数量':[30,20],'累计小订转化率':[.1,.2],'累计直接大定占比':[.75,50/70],'累计直接大定进度':[.6,1]}});
+assert(rates.includes('>20.0%</text>'));assert(rates.includes('71.4%'));assert(!rates.includes('100.0%'));
+assert(rates.includes('D2 · 当日直接大定 20 · 当日小订转大 10 · 来源合计 30'));
+'''
+        subprocess.run([node, '-e', self.rhythm_runtime() + checks], check=True, capture_output=True)
+
+    def test_rhythm_charts_use_shared_compact_presentation(self):
+        script = (ROOT / "templates/dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates/dashboard.css").read_text(encoding="utf-8")
+        adapters = script[script.index('  function renderLaunch(data){'):script.index('  function renderColumns(rows,color){')]
+        self.assertEqual(adapters.count('return renderRhythmChart('), 5)
+        self.assertNotIn('<svg', adapters)
+        self.assertNotIn('<rect', adapters)
+        self.assertNotIn('hourlyPlotHeight', script)
+        self.assertNotIn('rhythmLineLabelY', script)
+        self.assertIn('bindRhythmCharts();', script)
+        self.assertIn('rhythmObserver?.disconnect()', script)
+        self.assertNotIn('.hourly-bars', css)
+        self.assertNotIn('.hourly-chart', css)
+        self.assertNotIn('.rhythm-hourly-chart', css)
+        self.assertNotIn('.launch-chart', css)
+        self.assertNotIn('rhythm-label-background', script + css)
+        self.assertNotIn('rhythm-grid-line', script + css)
+        self.assertEqual(css.count('.rhythm-chart {'), 1)
+        self.assertIn('height:var(--rhythm-frame-height)', css)
+        self.assertIn('overflow-x:auto', css)
+
+    def test_rhythm_geometry_is_fixed_pixel_and_labels_cannot_drift(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node unavailable')
+        checks = r'''
+const assert=require('assert');
+for(const count of [1,14,24,100])for(const width of [320,768,1440]){
+ const g=rhythmGeometry(count,width);assert.equal(g.barWidth,28);assert.equal(g.height,224);assert.equal(g.frameHeight,240);
+ assert.equal(g.plotHeight,160);assert.equal(g.step,40);assert.equal(g.left,g.right);
+ assert.equal(g.width,60+count*40,'wide screens must not stretch the column gaps');
+}
+const point={x:100,y:100},geometry=rhythmGeometry(2,500),occupied=[],points=[point],original=JSON.stringify([occupied,points]);
+const placed=rhythmLineLabel(point,'40.0%',occupied,points,[],geometry);
+assert(placed&&Math.abs(placed.y-point.y)<=24);assert.equal(JSON.stringify([occupied,points]),original);
+const completed={x:100,y:geometry.top};
+assert(rhythmLineLabel(completed,'100.0%',[],[completed],[],geometry),'100% endpoint needs space above the plot');
+assert.equal(rhythmLineLabel(point,'40.0%',[{left:0,right:500,top:0,bottom:260}],points,[],geometry),null,'hide instead of moving away from its point');
+const close=renderDailyCancel(Array.from({length:14},(_,i)=>({period:'D'+(i+1),daily:10,big_daily:10,small_rate:.06,big_rate:.02})));
+const labelled=[...close.matchAll(/data-rhythm-label="line"[^>]*data-series="([^"]+)"/g)].map(match=>match[1]);
+assert.equal(labelled.filter(key=>key==='small_rate').length,14);assert.equal(labelled.filter(key=>key==='big_rate').length,14,'nearby curves must retain every label');
+const scenarios=[[0,0],[1,1],[.5,.5],[.06,.02],[.00001,.0001],[null,0],['0','0.7'],[undefined,''],['invalid',null]];
+for(const values of scenarios){
+ const rows=Array.from({length:100},(_,i)=>({period:'D'+(i+1),daily:i%3?10:0,big_daily:i%2?10:0,small_rate:values[0],big_rate:values[1]})),before=JSON.stringify(rows),html=renderDailyCancel(rows);
+ const known=values.filter(value=>value!=null&&value!==''&&Number.isFinite(Number(value))).length,nonzero=values.filter(value=>value!=null&&value!==''&&Number.isFinite(Number(value))&&Number(value)!==0).length;
+ assert.equal((html.match(/data-rhythm-point=/g)||[]).length,100*known);
+ assert.equal((html.match(/data-rhythm-label="line"/g)||[]).length,100*nonzero,'only exact-zero rates omit labels; rounded nonzero rates retain labels');
+ assert.equal(JSON.stringify(rows),before,'display must not modify source values');
+}
+const missing=renderDailyCancel([{period:'D1',daily:1,big_daily:2,small_rate:null,big_rate:0},{period:'D2',daily:1,big_daily:2,small_rate:.1,big_rate:null},{period:'D3',daily:1,big_daily:2,small_rate:null,big_rate:1}]);
+assert(missing.includes('小订退率 — · 大定退率 0.0%'));
+assert.equal((missing.match(/data-rhythm-label="line"/g)||[]).length,2);
+assert.equal((missing.match(/>0.0%<\/text>/g)||[]).length,0);
+const rounded=renderDailyCancel([{period:'D1',daily:1,big_daily:2,small_rate:.00001,big_rate:0}]);
+assert.equal((rounded.match(/>0.0%<\/text>/g)||[]).length,1,'a nonzero value rounded to 0.0% must stay visible');
+const other=renderSmallOrderRhythm([{period:'D1',orders:10,retained:0,cancel:10,retention_rate:0}]);
+assert.equal((other.match(/data-rhythm-label="line"/g)||[]).length,1,'other rhythm charts retain their zero labels');
+'''
+        subprocess.run([node, '-e', self.rhythm_runtime() + checks], check=True, capture_output=True)
+
+    def test_rhythm_line_labels_keep_series_colors_over_bars(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node unavailable')
+        checks = r'''
+const assert=require('assert');
+const spec={title:'color',rows:[{label:'D1',total:100,values:{bar:100},rates:{rate:.5}}],maxValue:120,series:[{key:'bar',label:'bar',color:'#1677FF'}],lines:[{key:'rate',label:'rate',color:'#00B578',textColor:'#102238',digits:1}]};
+const html=renderRhythmSvg(spec,320),lineLabel=html.match(/<text class="rhythm-value-label rhythm-line-label"[^>]*>/)?.[0];
+assert(lineLabel,'line percentage label should render');
+assert(lineLabel.includes('data-series="rate"'));
+assert(lineLabel.includes('fill:#00B578'),'line label must use its series color');
+assert(!lineLabel.includes('fill:#102238'),'bar overlap must not neutralize line label color');
+'''
+        subprocess.run([node, '-e', self.rhythm_runtime() + checks], check=True, capture_output=True)
+
+    def test_rhythm_preserves_every_total_before_allocating_rate_labels(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node unavailable')
+        checks = r'''
+const assert=require('assert');
+const rows=Array.from({length:24},(_,i)=>({label:'2026-10-'+String(i+1).padStart(2,'0'),total:i===0?null:i*35,values:{orders:i*35},rates:{rate:i/24}}));
+const spec={title:'test',rows,maxValue:chartMax(rows.map(row=>row.total)),series:[{key:'orders',label:'orders',color:'#1677ff'}],lines:[{key:'rate',label:'rate',color:'#0070c0'}]},before=JSON.stringify(spec);
+for(const width of [320,768,1440,1920]){
+ const html=renderRhythmSvg(spec,width),labels=[...html.matchAll(/data-rhythm-label="total" data-index="(\d+)"[^>]*>([^<]*)<\/text>/g)];
+ assert.equal(labels.length,24,'every column has its total, even beside a rate curve');
+ labels.forEach((match,index)=>{assert.equal(Number(match[1]),index);assert.equal(match[2],index===0?'—':fmt(index*35));});
+ assert(!html.includes('rhythm-label-background')&&!html.includes('rhythm-grid-line'));
+ assert(html.includes('>10-01<title>2026-10-01</title>'),'short axis date preserves full date');
+}
+assert.equal(JSON.stringify(spec),before);
+assert.equal(rhythmAxisText('D1'),'D1');assert.equal(rhythmAxisText('23时'),'23时');
+const larger=rhythmLabelBox('12345',50,50,10),smaller=rhythmLabelBox('12345',50,50,9);
+assert(smaller.right-smaller.left<larger.right-larger.left,'collision measurement must honor the smaller font');
+'''
+        subprocess.run([node, '-e', self.rhythm_runtime() + checks], check=True, capture_output=True)
+
+    def test_rhythm_labels_avoid_points_and_keep_hourly_tooltip_values(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node unavailable")
+        checks = r'''
+const assert=require('assert');
+const smallRows=[{period:'D1',hour:'0',count:1,cancel:0},{period:'D1',hour:'19',count:10000,cancel:1},{period:'D2',hour:'0',count:2,cancel:1}],before=JSON.stringify(smallRows);
+const smallHtml=renderHourlyChart(smallRows,'总计');
+assert.equal((smallHtml.match(/data-rhythm-row=/g)||[]).length,24);
+assert(smallHtml.includes('小订留存 9,999')&&smallHtml.includes('退订 1 · 总计 10,000'));
+assert(smallHtml.includes('退订 1 · 总计 3'));
+assert(!renderHourlyChart(smallRows,'D1').includes('总计 3</title>'));
+assert.equal(JSON.stringify(smallRows),before);
+const launchHtml=renderLaunchHourlyChart([{period:'D1',hour:'19',orders:10000,small:9999,direct:1}],'D1');
+assert.equal((launchHtml.match(/data-rhythm-row=/g)||[]).length,24);
+assert(launchHtml.includes('小订转大 9,999')&&launchHtml.includes('直接大定 1 · 总计 10,000'));
+assert(!/data-rhythm-label="segment"[^>]*>1<\/text>/.test(launchHtml),'too-small segment cannot force a label outside the bar');
+'''
+        subprocess.run([node, "-e", self.rhythm_runtime() + checks], check=True, capture_output=True)
+
+    def test_day_period_selector_uses_chronological_order(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        sorter = script[script.index("function sortPeriods"):script.index("async function renderFilters")]
+        self.assertIn("return pa-pb;", sorter)
+        self.assertNotIn("return pb-pa;", sorter)
+
+    def test_runtime_logs_use_a_flat_timestamped_generate_html_file(self):
+        main = (ROOT / "main.py").read_text(encoding="utf-8")
+        self.assertIn('log_dir = output_dir / "log"', main)
+        self.assertIn('log_dir.mkdir(parents=True, exist_ok=True)', main)
+        self.assertIn('strftime("%Y%m%d_%H%M%S")', main)
+        self.assertIn('f"generate_html_{timestamp}.log"', main)
+        self.assertNotIn('output_dir / "generation.log"', main)
+        self.assertNotIn('write_text("\\n".join(warnings)', main)
+        self.assertIn('legacy_warning_file.unlink()', main)
+
+    def test_raw_table_supports_freezing_first_row_and_title_columns(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        self.assertIn("rawFreezeRow:true,rawFreezeColumn:false,rawFreezeFirstColumn:true", script)
+        self.assertIn('aria-label="锁窗格"', script)
+        self.assertIn('id="rawFreezeRow"', script)
+        self.assertIn('id="rawFreezeColumn"', script)
+        self.assertIn('id="rawFreezeFirstColumn"', script)
+        self.assertIn("锁定标题列", script)
+        self.assertIn('classList.toggle("freeze-row",state.rawFreezeRow)', script)
+        self.assertIn('classList.toggle("freeze-column",state.rawFreezeColumn||state.rawFreezeFirstColumn)', script)
+        self.assertIn("function rawCellIsData(value)", script)
+        self.assertIn("function rawTitleColumnCount(rows)", script)
+        self.assertIn("function applyRawFrozenColumns(rows)", script)
+        self.assertIn('data-raw-col="${col}"', script)
+        self.assertIn("applyRawFrozenColumns(filtered)", script)
+        self.assertIn(".raw-table.freeze-row .data-table th", css)
+        self.assertIn(".raw-table.freeze-column .data-table .raw-frozen-column", css)
+        self.assertIn(".raw-table.freeze-row.freeze-column .data-table th.raw-frozen-column", css)
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node unavailable")
+        runtime = script[script.index("  function rawCellIsData"):script.index("  function renderRawTable")]
+        checks = r'''
+const assert=require('assert'),state={rawFreezeColumn:true,rawFreezeFirstColumn:false},frames=[];
+const classes=()=>({values:new Set(),add(...names){names.forEach(name=>this.values.add(name))},remove(...names){names.forEach(name=>this.values.delete(name))},toggle(name,on){on?this.values.add(name):this.values.delete(name)}});
+const cells=Array.from({length:4},(_,col)=>({col,classList:classes(),style:{removeProperty(name){delete this[name]}},getBoundingClientRect(){return {width:100}}}));
+const root={isConnected:true,classList:classes(),querySelectorAll(selector){return selector.startsWith('[data-raw-col=')?cells.filter(cell=>cell.col===Number(selector.match(/"(\d+)"/)[1])):cells.filter(cell=>cell.classList.values.has('raw-frozen-column'))}};
+const $=()=>root,requestAnimationFrame=callback=>frames.push(callback),flush=()=>{while(frames.length)frames.shift()()},frozen=()=>cells.filter(cell=>cell.classList.values.has('raw-frozen-column')).map(cell=>cell.col);
+const rows=[['品牌','车型','数量','占比'],['问界','M9',12,.5]],before=JSON.stringify(rows);
+applyRawFrozenColumns(rows);flush();assert.deepEqual(frozen(),[0,1],'title mode preserves multiple title columns');
+state.rawFreezeColumn=false;state.rawFreezeFirstColumn=true;applyRawFrozenColumns(rows);flush();assert.deepEqual(frozen(),[0]);
+applyRawFrozenColumns([['编号','名称'],[1,'门店']]);flush();assert.deepEqual(frozen(),[0],'first column freezes even when numeric');
+state.rawFreezeColumn=true;state.rawFreezeFirstColumn=false;applyRawFrozenColumns(rows);
+state.rawFreezeColumn=false;state.rawFreezeFirstColumn=true;applyRawFrozenColumns(rows);flush();assert.deepEqual(frozen(),[0],'stale animation frame must not restore title columns');
+applyRawFrozenColumns(rows);state.rawFreezeFirstColumn=false;applyRawFrozenColumns(rows);flush();assert.deepEqual(frozen(),[],'turning off before paint stays off');
+state.rawFreezeFirstColumn=true;applyRawFrozenColumns([]);flush();assert.deepEqual(frozen(),[],'empty tables are safe');
+assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values');
+'''
+        subprocess.run([node, "-e", runtime + checks], check=True, capture_output=True)
+
+    def test_sales_forecast_has_three_lifecycle_stages(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        self.assertIn('{id:"small",label:"小订预测"}', script)
+        self.assertIn('{id:"launch",label:"首销预测"}', script)
+        self.assertIn('{id:"steady",label:"平销预测"}', script)
+        self.assertNotIn("data-forecast-stage-nav", script)
+        self.assertNotIn("forecastNavExpanded", script)
+        self.assertIn('data-forecast-stage-switch="${stage.id}"', script)
+        self.assertIn('button.dataset.module===state.module', script)
+        self.assertIn('请选择具体车型（代际）后查看', script)
+        self.assertNotIn('class="module-subnav"', script)
+        self.assertNotIn('class="forecast-lifecycle-tabs"', script)
+        self.assertIn('if(target?.stage==="ended")return "steady"', script)
+        self.assertIn('if(target?.stage==="active")return "launch"', script)
+        self.assertIn('if(target?.stage==="before")return "small"', script)
+        self.assertIn("state.forecastStageAuto=false", script)
+        self.assertIn("activateForecastStage(button.dataset.forecastStageSwitch)", script)
+        self.assertIn("const root=document.querySelector('.forecast-workspace.forecast-v2');showForecastStageSummary(root,id);applyForecastView(root,state.forecastView||\"result\")", script)
+        self.assertIn("setForecastStageSummary(root,'small',stageLabel,source.textContent)", script)
+        self.assertIn("setForecastStageSummary(root,'launch',stageBadge,stageSource)", script)
+        self.assertIn("setForecastStageSummary(root,'steady',stageLabel,sourceText)", script)
+        self.assertIn("findStageActual(target.name,'before')", script)
+        self.assertIn("transitionTotal||(current?.total_complete!==false?current?.total:0)", script)
+        self.assertIn("整理表→小订选配比例→小订退订分时汇总", script)
+        self.assertNotIn("findStageActual(target.name,'ended')", script)
+        self.assertIn("const targetSteady=target=>history.find", script)
+        self.assertIn("actualWeeks=[...(own?.weeks||[])]", script)
+        self.assertIn('data-forecast-current-day aria-live="polite"', script)
+        self.assertNotIn("data-small-stage", script)
+        self.assertNotIn("data-steady-stage", script)
+        self.assertIn('class="forecast-tabs forecast-target-tabs"', script)
+        self.assertLess(script.index('class="forecast-tabs forecast-target-tabs"'), script.index('class="forecast-target-sources"'))
+        self.assertNotIn('class="forecast-tab-row"', script)
+        self.assertIn('data-forecast-target="smallStartDate"', script)
+        self.assertNotIn('data-forecast-target="weekday"', script)
+        self.assertIn("function applyForecastView", script)
+        self.assertIn("applyForecastView(root,state.forecastView||\"result\")", script)
+        self.assertIn("const forecastDrafts=new Map()", script)
+        self.assertIn("forecastDrafts.set(root._forecastSubjectId||state.subject", script)
+        self.assertIn("window.addEventListener(\"popstate\"", script)
+        self.assertIn('history[`${mode}State`]', script)
+        self.assertIn("scheduleForecastUpdate", script)
+        self.assertIn("scrollIntoView({block:'start'", script)
+        self.assertIn("button.setAttribute('aria-controls',`${prefix}-pane-${button.dataset.forecastTab}`)", script)
+        self.assertIn("交车锁单口径：按天预测、按周汇总", script)
+        self.assertNotIn("平销期大定 = 平销期直接大定", script)
+        self.assertIn("metric:valueKey==='lock'?'周交车锁单':'当日小订'", script)
+        self.assertIn("bindForecastLifecycleNavigation", script)
+        self.assertIn("ArrowRight", script)
+        self.assertIn(".module-bar .module-subnav", css)
+        self.assertIn("box-shadow:none;", css[css.index(".module-bar .module-nav .module-subnav button.active"):css.index(".workspace", css.index(".module-bar .module-nav .module-subnav button.active"))])
+        self.assertIn(".forecast-stage-pane.active", css)
+        self.assertIn(".forecast-steady .forecast-lifecycle-kpis article{border-top-color:#2f7fd2}", css)
+        self.assertIn(".forecast-steady .forecast-lifecycle-bars article.actual .forecast-lifecycle-bar i{background:#56a1e9}", css)
+        self.assertIn(".forecast-target-meta{grid-column:1/-1;display:grid", css)
+        self.assertIn("overflow:visible;padding-right:2px", css)
+        self.assertIn("height:auto;\n  min-height:100%;\n  overflow:visible;", css)
+        self.assertIn(".forecast-scroll-body{display:flex;flex:0 0 auto", css)
+        self.assertIn(".page-workspace.forecast-page{\n  height:auto;", css)
+        self.assertIn(".page-workspace.forecast-page>.page-workspace-body{\n  flex:0 0 auto;\n  overflow:visible;", css)
+        self.assertIn("min-height:44px", css)
+
+    def test_forecast_calendar_is_automatic(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertNotIn('data-forecast-allocation="holidays"', script)
+        self.assertIn("adjustedWorkdays", script)
+        self.assertIn("周末调休按工作日处理", script)
+
+    def test_filters_are_the_last_control_group_in_the_topbar(self):
+        template = (ROOT / "templates" / "dashboard.html").read_text(encoding="utf-8")
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        topbar = template.split('<header class="topbar">', 1)[1].split("</header>", 1)[0]
+        self.assertIn('class="topbar-main"', topbar)
+        self.assertIn('<section class="filters" id="filters"', topbar)
+        self.assertLess(topbar.index('class="top-actions"'), topbar.index('id="filters"'))
+        self.assertIn('id="quickGenerationList"', topbar)
+        self.assertGreater(topbar.index('id="quickGenerations"'), topbar.index('</section>'))
+        self.assertIn("latestQuickGenerations", script)
+        self.assertIn("syncTopbarQuickLayout", script)
+        self.assertIn("quick-generation-wrapped", script)
+        self.assertIn("generationShortName", script)
+        self.assertIn('data-quick-generation', script)
+        self.assertIn("replace(/\\s+Ultimate\\b/ig,'U')", script)
+        self.assertIn("replace(/\\s+典藏大观\\b/g,'大观')", script)
+        self.assertIn("const generationAggregate=name=>", script)
+        self.assertIn("const candidates=DATA.subjects.filter(item=>item.type==='generation')", script)
+        self.assertIn("yearLabel=year?` ${String(year).slice(-2)}`:''", script)
+        self.assertIn(".quick-generation-list", css)
+        self.assertIn(".topbar.quick-generation-wrapped>.quick-generation-filter", css)
+        self.assertIn("flex-wrap:wrap", css)
+        self.assertNotIn("overflow-x:auto", css[css.index(".quick-generation-list"):css.index(".quick-generation-button")])
+        module_bar = template.split('<aside class="module-bar">', 1)[1].split("</aside>", 1)[0]
+        self.assertNotIn('id="filters"', module_bar)
+
+    def test_topbar_keeps_generated_time_and_compacts_small_screen_filters(self):
+        template = (ROOT / "templates" / "dashboard.html").read_text(encoding="utf-8")
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        topbar = template.split('<header class="topbar">', 1)[1].split("</header>", 1)[0]
+        self.assertIn('id="updatedAt"', topbar)
+        self.assertIn('select id="subjectSelect" aria-label="分析主体"', topbar)
+        self.assertIn('id="grainSelect"', topbar)
+        self.assertIn('select id="periodSelect" aria-label="分析周期"', topbar)
+        self.assertIn('$("#updatedAt").textContent=', script)
+        self.assertIn(".topbar .top-actions #updatedAt {\n  display:inline-flex;", css)
+        self.assertIn(".topbar .top-actions>span { display:inline-flex; }", css)
+        self.assertIn(".topbar-end {\n    display:grid;\n    grid-template-columns:auto minmax(0,1fr);", css)
+        self.assertIn(".topbar .filters {\n    width:auto;\n    flex:none;\n    min-width:0;\n    grid-template-columns:minmax(0,1.2fr) 140px minmax(100px,1fr);", css)
+        self.assertIn(".topbar .filters {\n    width:100%;\n    grid-template-columns:140px minmax(0,1fr);", css)
+        self.assertIn(".topbar .filters select { height:32px; padding:0 7px; font-size:11px; }", css)
+        self.assertIn(".topbar .top-actions { display:flex; min-width:0; max-width:100%; }", css)
+        self.assertIn(".topbar .filters label,.topbar .filters .filter-group { min-width:0; }", css)
+        self.assertIn(".topbar .filters select { width:100%; min-width:0; max-width:100%; }", css)
+        self.assertIn("grid-template-columns:minmax(0,1.2fr) 140px minmax(100px,1fr);", css)
+        self.assertIn("grid-template-columns:140px minmax(0,1fr);", css)
+        self.assertNotIn(".topbar .top-actions #updatedAt {\n    display:none;", css)
+        self.assertNotIn(".topbar .top-actions {\n    display:none;", css)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for quick-generation filtering")
+    def test_quick_generations_hide_special_and_outdated_variants(self):
+        result = subprocess.run(
+            ["node", str(ROOT / "tests" / "quick_generations.cjs")],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_non_temporal_modules_keep_static_time_filter_placeholders(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        self.assertIn('$("#grainSelect").closest(".filter-group").style.display=""', script)
+        self.assertNotIn('$("#grainSelect").closest("label")', script)
+        self.assertIn('["sales_forecast","generic","raw"].includes(state.module)', script)
+        self.assertIn("Object.entries(DATA.config.grain_labels)", script)
+        self.assertIn("按预测阶段窗口", script)
+        self.assertIn("按所选表格范围", script)
+        self.assertIn('period.disabled=true', script)
+        self.assertIn('period.disabled=false', script)
+        self.assertIn(".topbar .filters select:disabled", css)
+        self.assertIn("cursor:not-allowed", css)
+
+    def test_navigation_is_a_single_left_sidebar(self):
+        template = (ROOT / "templates" / "dashboard.html").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        self.assertIn('<div class="app-shell">', template)
+        self.assertIn('<aside class="module-bar">', template)
+        self.assertIn("grid-template-columns:120px minmax(0,1fr)", css)
+        self.assertIn("grid-template-columns:minmax(0,1fr)", css)
+        self.assertIn("flex-direction:column", css)
+        self.assertIn("flex:1 1 0", css)
+
+    def test_brand_logo_is_embedded_as_an_accessible_decorative_image(self):
+        template = (ROOT / "templates" / "dashboard.html").read_text(encoding="utf-8")
+        self.assertIn('class="brand-mark" src="__BRAND_LOGO__" alt="" aria-hidden="true"', template)
+        self.assertTrue((ROOT / "templates" / "brand-logo.png").exists())
+
+    def test_config_supports_either_chart_source_and_requested_module_order(self):
+        config = load_config(ROOT / "config.json")
+        self.assertIn(config["chart_render_mode"], {"original", "generated"})
+        self.assertEqual(config["chart_render_mode"], "generated")
+        self.assertEqual(config["module_order"], ["sales_forecast", "raw"])
+
+    def test_generated_chart_renderers_include_visible_data_labels(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn('class="rhythm-value-label rhythm-', script)
+        self.assertIn('data-rhythm-label', script)
+        self.assertIn("segment-data-labels", script)
+        self.assertIn("column-data-label", script)
+        self.assertIn("data-rhythm-bar", script)
+        self.assertIn("data-launch-hourly-select", script)
+        self.assertIn("renderLaunchHourlyChart", script)
+        self.assertIn('<span>分时口径</span><select data-hourly-select', script)
+        self.assertIn('<span>分时口径</span><select data-launch-hourly-select', script)
+        self.assertIn('["总计",...days]', script)
+        self.assertIn('replace(/[ T]00:00:00$/, "")', script)
+
+    def test_pie_charts_show_direct_percentage_labels(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        renderer = script[script.index("function renderPieChart"):script.index("function renderStructureCards")]
+        self.assertIn("const sliceLabels=source.map", renderer)
+        self.assertIn('class="pie-slice-label"', renderer)
+        self.assertIn("percent.toFixed(1)", renderer)
+        self.assertIn(".pie-slice-label", css)
+        self.assertIn("dominant-baseline:middle", css)
+        self.assertIn("donut:renderPieChart", script)
+        self.assertIn('aria-label="占比圆环图"', renderer)
+
+    def test_chart_labels_use_requested_colors_without_halo(self):
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        label = re.search(r"\.chart-data-label\s*\{([^}]*)\}", css, re.S)
+        on_color = re.search(r"\.chart-data-label\.on-color\s*\{([^}]*)\}", css, re.S)
+        total = re.search(r"\.chart-data-label\.total-label\s*\{([^}]*)\}", css, re.S)
+        self.assertIsNotNone(label)
+        self.assertIsNotNone(on_color)
+        self.assertIsNotNone(total)
+        self.assertIn("fill:#334155", label.group(1))
+        self.assertIn("stroke:none", label.group(1))
+        self.assertNotIn("paint-order", label.group(1))
+        self.assertIn("fill:#334155", on_color.group(1))
+        self.assertIn("fill:#C00000", total.group(1))
+        self.assertNotRegex(script, r'class="chart-data-label[^\n>]*"[^>]*\sfill=')
+
+    def test_chart_labels_have_headroom_and_collision_avoidance(self):
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("const LABEL_SCALE_HEADROOM=1.18", script)
+        self.assertIn("function avoidLabelY", script)
+        self.assertIn("maxValue:chartMax(data.map(row=>row.count))", script)
+        self.assertIn("maxValue:chartMax(data.map(row=>row.orders))", script)
+        self.assertIn("lineLabelMaxOffset:24", script)
+        self.assertIn("rhythmLabelClear(box,occupied,points,segments)", script)
+        self.assertIn("color:var(--ink-2)", css)
+
+    def test_stacked_trend_uses_requested_palette_in_series_order(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        palette = '["#FFF2CC","#E2F0D9","#C8E8E8","#A8D8EA","#A0C1E8","#DCC5ED","#F0C8C8","#F8D8B0"]'
+        self.assertIn(f"const stackedTrendPalette={palette}", script)
+        self.assertIn("seriesFill=index=>stackedTrendPalette[index%stackedTrendPalette.length]", script)
+        self.assertNotRegex(script, r"seriesFill=.*增程")
+        self.assertNotRegex(script, r"seriesFill=.*纯电")
+
+    def test_stacked_trend_places_series_from_top_to_bottom(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("const rates=series.map(item=>Math.max(0,Number(item.values[index]||0)))", script)
+        self.assertIn("let y=bottom-stackHeight", script)
+        self.assertIn("segmentY=y;y+=height", script)
+        self.assertIn('y="${segmentY}"', script)
+
+    def test_stacked_trend_uses_plain_segment_labels_and_no_line_markers(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        renderer = script[script.index("function renderStackedTrend"):script.index("function renderTable")]
+        self.assertIn('class="chart-data-label stack-segment-label"', renderer)
+        self.assertIn('(rate*100).toFixed(0)', renderer)
+        self.assertNotIn('(rate*100).toFixed(1)', renderer)
+        self.assertIn("const stackedBarWidth=step=>Math.min(42,step*.58)", script)
+        self.assertIn("barW=stackedBarWidth(step)", renderer)
+        self.assertNotIn("<circle", renderer)
+        segment_label = re.search(r"\.chart-data-label\.stack-segment-label\s*\{([^}]*)\}", css, re.S)
+        self.assertIsNotNone(segment_label)
+        self.assertIn("font-size:8px", segment_label.group(1))
+        self.assertIn("font-weight:400", segment_label.group(1))
+        self.assertIn("fill:#404040", segment_label.group(1))
+        self.assertIn(".stacked-chart .chart-data-label {\n  font-size:10px;", css)
+        self.assertIn(".stacked-chart .chart-data-label.stack-segment-label {\n  font-size:9px;", css)
+
+    def test_overview_stacked_trends_default_to_latest_period(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("function alignOverviewChartScrollbars()", script)
+        self.assertIn('if(state.module!=="overview")return;', script)
+        self.assertIn('document.querySelectorAll("#page .stacked-chart")', script)
+        self.assertIn("chart.scrollLeft=Math.max(0,chart.scrollWidth-chart.clientWidth)", script)
+        self.assertIn("requestAnimationFrame(align)", script)
+        self.assertIn("alignOverviewChartScrollbars();", script)
+
+    def test_svg_stacked_bars_use_square_corners(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        renderers = [
+            ("function renderRhythmSvg", "function renderRhythmChart"),
+            ("function renderStackedTrend", "function renderTable"),
+            ("function renderLaunch", "function renderSmallOrderRhythm"),
+            ("function renderSmallOrderRhythm", "function renderTrend"),
+            ("function renderDailyCancel", "function renderHourlyChart"),
+        ]
+        for start, end in renderers:
+            renderer = script[script.index(start):script.index(end)]
+            self.assertNotRegex(renderer, r"<rect[^>]*\brx=", msg=f"rounded corner in {start}")
+
+    def test_sales_forecast_uses_and_syncs_the_top_subject_selector(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn('moduleId==="sales_forecast"', script)
+        self.assertIn('item?.type==="generation"&&(item.modules.includes(moduleId)||DATA.subjects.some', script)
+        self.assertNotIn('state.module==="sales_forecast"&&item.type!=="generation"', script)
+        self.assertIn('const workspace=state.module==="sales_forecast"?{...page.workspace,data:linkedForecastData(page.workspace.data)}', script)
+        self.assertNotIn('data-forecast-target="name"', script)
+        self.assertIn("const targetState=()=>{const name=data.target?.name||''", script)
+        self.assertIn('$("#subjectSelect").onchange=async event=>{captureForecastDraft();state.subject=event.target.value;if(state.module==="sales_forecast")state.forecastStageAuto=true;if(await ensureState()===false)return;await renderAll();syncUrl("push")}', script)
+        self.assertNotIn('[["generation","预测代际"]]', script)
+        self.assertIn('[["group","集团"],["brand","品牌"],["generation","代际"]]', script)
+
+    def test_forecast_shared_payload_is_not_a_group_or_brand_forecast(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node unavailable')
+        script = (ROOT / 'templates/dashboard.js').read_text(encoding='utf-8')
+        availability = script[script.index('  const moduleAvailable='):script.index('  function forecastDataFromBoard')]
+        loader = script[script.index('  const boardCache={}'):script.index('  function subject()')]
+        navigation = script[script.index('  async function ensureState()'):script.index('  function renderSubjectSelect()')]
+        setup = """
+        const group={id:'group',type:'group',modules:['sales_forecast','overview','raw']},
+            brand={id:'brand',type:'brand',modules:['sales_forecast','raw']},
+            generation={id:'new-car',type:'generation',modules:['raw']};
+        const DATA={subjects:[group,brand,generation],dashboard_blocks:{'group|sales_forecast':'shared'}},
+            state={subject:'group',module:'sales_forecast',grain:'week'};
+        const decompressJson=async value=>({payload:value}),unpackDashboard=value=>value,
+            subject=()=>DATA.subjects.find(item=>item.id===state.subject),syncForecastStageToTarget=async()=>{};
+        """
+        checks = """
+        (async()=>{
+            if(moduleAvailable(group,'sales_forecast')||moduleAvailable(brand,'sales_forecast')||moduleAvailable(undefined,'sales_forecast'))throw Error('invalid forecast owner');
+            if(!moduleAvailable(generation,'sales_forecast'))throw Error('generation lost shared payload');
+            if(await getDashboard('group','sales_forecast')!==null)throw Error('group loaded a vehicle forecast');
+            if((await getDashboard('new-car','sales_forecast')).payload!=='shared')throw Error('shared payload lost');
+            await ensureState();if(state.module!=='overview')throw Error('group fallback invalid');
+            state.subject='brand';state.module='sales_forecast';await ensureState();
+            if(state.module!=='raw')throw Error('unavailable forecast selected as fallback');
+        })().catch(error=>{console.error(error);process.exitCode=1});
+        """
+        subprocess.run([node, '-e', setup + availability + loader + navigation + checks],
+                       text=True, encoding='utf-8', capture_output=True, check=True)
+
+    def test_sales_forecast_vehicle_and_launch_settings_are_always_visible(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        self.assertNotIn('forecast-target-editor', script)
+        self.assertIn('<div class="forecast-target-form">', script)
+        self.assertIn('.forecast-workspace.forecast-v2 .forecast-target>.forecast-target-form{grid-template-columns:repeat(7', css)
+
+    def test_sales_forecast_frontend_uses_backend_vehicle_mapping(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
+        self.assertIn("modelAliases=data.model_aliases||{}", script)
+        self.assertIn("const forecastModelAliases=()=>", script)
+        self.assertIn("forecastModelKey=(value,aliases=forecastModelAliases())", script)
+        self.assertIn("sameForecastModel(a,b,modelAliases)", script)
+        self.assertNotIn("const rawModelKey=value=>", script)
+        self.assertIn("model_mapping = _read_model_mapping()", module)
+        self.assertIn('"model_aliases": model_mapping', module)
+        self.assertNotIn("问界|智界|享界|尊界|尚界", script.split("const rawForecastModelKey=", 1)[1].split(";", 1)[0])
+
+    def test_sales_forecast_never_inherits_another_targets_parameters(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        linked = script.split("function linkedForecastData(data)", 1)[1].split("function linkedForecastSource", 1)[0]
+        self.assertNotIn("original.total_small", linked)
+        self.assertNotIn("original.conversion", linked)
+        self.assertNotIn("original.direct_share", linked)
+        self.assertIn("total_small:Number(option.small??0)", linked)
+
+    def test_sales_forecast_separates_observable_structure_from_reference_completion(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
+        refresh = (ROOT / "tools" / "refresh_sales_forecast_data.py").read_text(encoding="utf-8")
+        self.assertIn("结构、斜率和累计曲线只比较真实已发生部分", script)
+        self.assertIn("总小订量级可引用上一阶段小订预测，并明确标注", script)
+        self.assertIn("参考车型同期小转大完成率", script)
+        self.assertIn("不预先计算自身完成率", script)
+        self.assertIn("D2可观测小转大斜率", script)
+        self.assertIn("D2订单来源斜率", script)
+        self.assertIn("早期退订质量", script)
+        self.assertIn("D1小转大/D1大定", refresh)
+        self.assertIn("D1+D2小转大/D1+D2大定", refresh)
+        self.assertIn("未映射·暂按传播名", refresh)
+        self.assertIn("不计算未知的当前车型自身完成率", module)
+        self.assertIn("大定：${d1FieldSource('gross')}", script)
+        self.assertIn("D1大定按阶段顺序逐字段回退后仍缺失", script)
+
+    def test_sales_forecast_combines_progress_curves_and_uses_parameter_lines(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("参考确认后的小转大预测完成度", script)
+        self.assertIn("参考确认后的直接大定预测完成度", script)
+        self.assertIn("截至各日真实累计量÷方法一预测终局", script)
+        self.assertIn("当前真实日不会提前归一到100%", script)
+        self.assertIn("只有首销结束日达到100%", script)
+        self.assertIn("const terminal=rows.reduce", script)
+        self.assertIn("return terminal>0?running/terminal:null", script)
+        self.assertIn("const rows=spec.observableShape?(comparison.progressRows||[]):(comparison.rows||[])", script)
+        self.assertNotIn("renderCompletionMini", script)
+        self.assertIn('ariaLabel:title,title,note,table:true,rangeMax,ratePrecision:1', script)
+        self.assertIn("方法二 · 小订转化率 by天", script)
+        self.assertIn("方法二 · 直接大定占比 by天", script)
+        self.assertIn("逐日累计小转大 ÷ 总小订", script)
+        self.assertIn("逐日累计直接大定 ÷ 逐日累计总大定", script)
+
+    def test_sales_forecast_attribute_dropdowns_only_use_vehicle_master_values(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
+        self.assertIn("const tierValues=[...new Set([target.tier,...(data.tiers||[])", script)
+        self.assertIn("const nodeValues=[...new Set([target.launch_node,...(data.nodes||[])", script)
+        self.assertNotIn("'标准发布','年度换代','年度改款','品牌首发','衍生款发布'", script)
+        self.assertIn('"tiers": _master_values(model_master, "产品档位")', module)
+        self.assertIn('"nodes": _master_values(model_master, "发布类型")', module)
+
+    def test_sales_forecast_has_a_scoring_tab_backed_by_the_real_score_function(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        self.assertIn('data-forecast-tab="score">预测打分</button>', script)
+        self.assertIn('data-forecast-pane="score"', script)
+        self.assertIn("const scoreSpecs=", script)
+        self.assertIn("const renderScoreDashboard=target=>", script)
+        self.assertIn("页面直接调用实际排序函数与同一份权重配置，不另算展示分", script)
+        self.assertIn("part.value*part.weight/effectiveWeight*100", script)
+        self.assertIn("单项相似度", script)
+        self.assertIn("折算贡献", script)
+        self.assertIn("const scoreRuleText=", script)
+        self.assertIn("const scoreRuleFor=", script)
+        self.assertIn("为什么这样打分", script)
+        self.assertIn("相似度计算规则", script)
+        self.assertIn("缺失处理", script)
+        self.assertIn("实际对比、评分规则与贡献", script)
+        self.assertIn('.forecast-pane[data-forecast-pane="score"].active', css)
+        self.assertIn(".forecast-score-rule-box", css)
+        self.assertIn(".forecast-score-detail-table th:nth-child(2),.forecast-score-detail-table td:nth-child(2){width:210px;min-width:210px;max-width:210px;white-space:normal;overflow-wrap:anywhere}", css)
+
+    def test_small_and_steady_score_pages_explain_the_actual_ranking(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
+        self.assertIn("function renderLifecycleScorePage", script)
+        self.assertIn("const smallScoreRules=", script)
+        self.assertIn("smallReferenceScore(item,target,current,minimumEvidence)", script)
+        self.assertIn("const steadyScoreRules=", script)
+        self.assertIn("steadyReferenceScore({...item,...right},target,left,minimumEvidence)", script)
+        self.assertIn("有效单项相似度之和", script)
+        self.assertIn("实际对比、评分规则与贡献", script)
+        self.assertIn("排序与本页明细直接调用同一个逐项评分结果", script)
+        self.assertIn("主辅权重不改变候选得分", script)
+        self.assertIn("以全首销直接大定归一化形状为主", script)
+        self.assertIn("证据不足的车型仍可人工选择", script)
+        self.assertIn("event_id||item.model", script)
+        self.assertNotIn("小订转化率、小转大占比仅参与相似度", script)
+        self.assertIn("基线优先本车型已有平销真实日", module)
+        self.assertIn("所有平销KPI、图表、周合计和来源说明均为交车锁单口径", module)
+        self.assertNotIn("最近2至4周稳健周均", module)
+
+    def test_lifecycle_result_and_evidence_share_launch_structure(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        lifecycle = script[script.index("function renderSmallOrderWorkspace"):script.index("function renderForecastWorkspaceV2")]
+        self.assertEqual(lifecycle.count("renderLifecycleConclusion("), 2)
+        self.assertEqual(lifecycle.count('class="forecast-result-main"'), 2)
+        self.assertEqual(lifecycle.count('class="forecast-method"'), 2)
+        self.assertNotIn('class="forecast-lifecycle-evidence"', lifecycle)
+        self.assertNotIn('class="forecast-lifecycle-kpis"', lifecycle)
+        self.assertIn("renderForecastEvidenceGroup('终局预测参考'", lifecycle)
+        self.assertIn("renderForecastEvidenceGroup('逐日分配与走势对照'", lifecycle)
+        self.assertIn("renderForecastEvidenceGroup('趋势参考'", lifecycle)
+        self.assertIn('renderForecastEvidenceGroup(group.title,group.note,cards,group.keys.length)', script)
+        self.assertIn('<p class="forecast-steady-chart-note">首销全周期直接大定形状决定参考；历史车型提供进入平销后的相对承接关系。本车型平销实际逐步校准规模和趋势，不套历史绝对量。</p><div class="forecast-task-chart" data-steady-reference-chart></div><div class="forecast-task-chart" data-steady-evidence', lifecycle)
+        self.assertEqual(script.count('首销全周期直接大定形状决定参考；历史车型提供进入平销后的相对承接关系。本车型平销实际逐步校准规模和趋势，不套历史绝对量。'), 1)
+        self.assertNotIn("data-steady-evidence]').innerHTML='<p>", script)
+
+    def test_small_and_steady_evidence_use_the_prediction_curves(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        self.assertIn("function renderLifecycleLineChart", script)
+        self.assertIn("data-small-reference-chart", script)
+        self.assertIn("data-steady-reference-chart", script)
+        self.assertIn("rebasedForecastCompletionCurve(item,field,days)", script)
+        self.assertIn("const lockValues=item=>", script)
+        self.assertIn("const recentRatio=item=>", script)
+        self.assertIn("全首销直接大定曲线规律", script)
+        self.assertIn("仅完整七天且锁单已收齐的平销周", script)
+        self.assertIn(".forecast-lifecycle-reference-chart{grid-column:1/-1", css)
+        self.assertIn(".forecast-lifecycle-line-scroll svg{height:auto;aspect-ratio:920/245}", css)
+        self.assertIn("function renderForecastEvidenceLines", script)
+        self.assertIn("target.innerHTML=renderForecastEvidenceLines({series", script)
+        self.assertIn("return renderForecastEvidenceLines({series:series.map", script)
+        self.assertIn("data-small-hourly-reference-chart", script)
+        self.assertIn("title:'D1 小订分时累计进度'", script)
+        self.assertIn("hour<=lastHour", script)
+        self.assertIn("ongoing&&!forecast.error?Number(forecast.d1)", script)
+        self.assertIn("d1Row?.orders:NaN", script)
+        self.assertIn("不使用整日数据冒充分时", script)
+        self.assertIn("role:'forecast',dashed:true", script)
+        self.assertNotIn("dashed:index>0", script)
+        self.assertIn(".forecast-task-chart .forecast-evidence-line-scroll{overflow-x:auto}", css)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for chart rendering checks")
+    def test_shared_evidence_chart_preserves_zero_missing_units_and_accessibility(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        helpers = script[script.index("  function renderForecastEvidenceLines("):script.index("  function renderLifecycleScorePage(")]
+        checks = r"""
+const assert=require('node:assert/strict');
+const esc=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
+const args={series:[{label:'current <test>',values:[0,.5,null],color:'#1677FF',role:'actual'},
+ {label:'reference',values:[0,.6,1],color:'#FF8A00',role:'reference'},
+ {label:'future',values:[null,.5,1],color:'#00A878',role:'forecast',dashed:true}],labels:['0时','1时','2时'],hourly:true,ariaLabel:'D1 comparison'};
+const rate=renderLifecycleLineChart(args);
+assert(rate.includes('viewBox="0 0 920 245"'));
+assert(rate.includes('current &lt;test> · 最新50%'));
+assert(rate.includes('0时 · 0.0%'));
+assert(rate.includes('tabindex="0" role="img"'));
+assert.equal((rate.match(/tabindex="0" role="img"/g)||[]).length,1,'one tab stop per chart; arrows navigate data points');
+assert(rate.includes('data-chart-readout role="status"'));
+assert(rate.includes('<td>—</td>'));
+assert(rate.includes('stroke-dasharray="7 5"'));
+assert(rate.includes('查看图表数值'));
+const number=renderLifecycleLineChart({...args,unit:'number',series:[{label:'locks',values:[0,700,null],color:'#1677FF',role:'actual'}]});
+assert(number.includes('最新700单'));assert(!number.includes('100%'));assert(number.includes('0时 · 0单'));
+const gap=renderLifecycleLineChart({...args,series:[{label:'gapped',values:[0,null,1],color:'#1677FF',role:'actual'}]});
+assert.equal((gap.match(/<polyline /g)||[]).length,2,'missing values must break the line, not be interpolated');
+const close=renderLifecycleLineChart({...args,unit:'number',series:[{label:'main',values:[700,700,700],color:'#FF8A00',role:'reference'},
+ {label:'aux',values:[500,500,500],color:'#7C3AED',role:'reference'}]});
+const labelPositions=[...close.matchAll(/<text x="48" y="([^"]+)"[^>]*>(?:700|500)单<\/text>/g)].map(match=>Number(match[1]));
+assert.equal(labelPositions.length,2);assert(Math.abs(labelPositions[0]-labelPositions[1])>=12,'nearby reference labels must not overlap');
+assert(renderLifecycleLineChart({...args,series:[],empty:'缺少D1分时'}).includes('缺少D1分时'));
+"""
+        result = subprocess.run([shutil.which("node"), "-e", helpers + checks], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for chart rendering checks")
+    def test_forecast_result_charts_keep_all_values_at_a_compact_natural_size(self):
+        script = (ROOT / "templates/dashboard.js").read_text(encoding="utf-8")
+        helpers = script[script.index("  const displayText ="):script.index("  const colors =")]
+        helpers += script[script.index("  function renderForecastQuantityChart("):script.index("  function renderForecastDecisionChartV2(")]
+        helpers += script[script.index("  function renderForecastEvidenceLines("):script.index("  function compactForecastScorePage(")]
+        checks = r'''
+const assert=require('node:assert/strict');
+for(const length of [1,7,35,120]){
+ const rows=Array.from({length},(_,i)=>({label:'D'+(i+1),date:'2026-10-'+String(i+1).padStart(2,'0'),value:i===2?null:i===0?0:123456+i,actual:i<4,small_conversion:.2,direct_share:.3}));
+ const before=JSON.stringify(rows),known=rows.filter(row=>Number.isFinite(row.value));
+ for(const launch of [false,true]){
+  const html=renderForecastQuantityChart(rows,{valueKey:'value',launch}),box=html.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/),labels=[...html.matchAll(/<text data-forecast-quantity-label[^>]*>(.*?)<\/text>/g)];
+  assert.equal(Number(box[2]),220);assert.equal(labels.length,known.length);
+  assert.deepEqual(labels.map(match=>match[1]),known.map(row=>fmt(row.value)));
+  assert.equal((html.match(/<rect /g)||[]).length,known.length);
+  assert([...html.matchAll(/<rect [^>]*width="([\d.]+)"/g)].every(match=>Number(match[1])<=18));
+  assert(html.includes('tabindex="0" role="region"'));assert(html.includes('查看图表数值'));
+  if(length>12)assert(Number(box[1])>length*55,'wide quantity labels keep their own horizontal space');
+ }
+ const args={series:[{label:'actual',role:'actual',color:'#1677FF',values:rows.map(row=>row.value)},{label:'external',role:'reference',dashed:true,color:'#7C3AED',values:rows.map(row=>row.value)}],labels:rows.map(row=>row.date),ariaLabel:'external',unit:'number'};
+ const compact=renderLifecycleLineChart({...args,compact:true});
+ const grid=compact.match(/<line x1="([\d.]+)"[^>]*x2="([\d.]+)"/);
+ for(const label of compact.matchAll(/<text data-forecast-external-label x="([\d.]+)"[^>]*>(.*?)<\/text>/g)){
+  assert(Number(label[1])-label[2].length*3.25>Number(grid[1]),'first value label must remain inside the plot, clear of the y-axis');
+  assert(Number(label[1])+label[2].length*3.25<Number(grid[2]),'last value label must keep space inside the plot');
+ }
+ assert.equal((compact.match(/data-forecast-external-label/g)||[]).length,known.length*2);
+ assert.equal((compact.match(/<circle /g)||[]).length,known.length*2);
+ assert(compact.includes('forecast-compact-line-scroll'));assert(compact.includes(' 220" role="img"'));
+ assert(compact.includes('stroke-dasharray="7 5"'));assert(compact.includes('0单'));
+ assert(renderLifecycleLineChart(args).includes('viewBox="0 0 920 245"'),'reference evidence geometry must remain unchanged');
+ assert.equal(JSON.stringify(rows),before,'display must not mutate forecast rows');
+}
+'''
+        result = subprocess.run([shutil.which("node"), "-e", helpers + checks], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_sales_forecast_result_layout_stays_expanded_and_uses_horizontal_space(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = script[script.index('function renderForecastWorkspaceV2'):]
+        scenarios = script.index('data-forecast-region="summary"')
+        parameters = script.index('data-forecast-region="parameters"')
+        charts = script.index('data-forecast-region="curves"')
+        common = script.index('data-forecast-region="common"')
+        scale = script.index('<section class="forecast-scale-check">')
+        self.assertLess(scenarios, parameters)
+        self.assertLess(charts, parameters)
+        self.assertLess(parameters, common)
+        self.assertLess(scale, parameters)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-control-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))", css)
+        self.assertIn(".forecast-result-main>.forecast-common-controls{grid-column:1/-1", css)
+        self.assertIn(".forecast-decision-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px", css)
+        self.assertIn(".forecast-decision-card .forecast-svg-scroll svg{height:280px}", css)
+        self.assertIn(".forecast-decision-card .forecast-decision-svg{width:100%;max-width:100%;min-width:0}", css)
+        self.assertIn('class="forecast-decision-svg"', script)
+        self.assertNotIn('class="forecast-decision-svg" viewBox="0 0 ${W} ${H}" style="width:${W}px"', script)
+        self.assertIn("@media(max-width:1500px)", css)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-control-grid{grid-template-columns:repeat(2,minmax(0,1fr))}", css)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-control-grid{grid-template-columns:1fr}", css)
+        self.assertNotIn('<details class="forecast-parameter-rail">', script)
+
+    def test_forecast_stage_errors_are_top_aligned_and_common_controls_precede_curves(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        small = script[script.index("function renderSmallOrderWorkspace"):script.index("function renderSteadyWorkspace")]
+        steady = script[script.index("function renderSteadyWorkspace"):script.index("function renderForecastWorkspaceV2")]
+        launch = script[script.index("data-forecast-data-error"):script.index("data-forecast-pane=\"score\"")]
+        self.assertLess(small.index('data-small-error'), small.index('id="small-forecast-pane-result"'))
+        self.assertLess(steady.index('data-steady-error'), steady.index('id="steady-forecast-pane-result"'))
+        self.assertLess(steady.index('data-steady-chart'), steady.index('data-forecast-import-anchor="steady"'))
+        self.assertLess(steady.index('data-steady-chart'), steady.index("renderStageCommonControls('steady')"))
+        self.assertLess(small.index('data-small-chart'), small.index("renderStageCommonControls('small')"))
+        self.assertLess(launch.index('data-forecast-data-error'), launch.index('id="forecast-pane-result"'))
+        self.assertLess(launch.index('data-forecast-decision-chart="parameter"'), launch.index('data-forecast-import-anchor="launch"'))
+        self.assertLess(launch.index('data-forecast-region="curves"'), launch.index('data-forecast-region="parameters"'))
+        self.assertLess(launch.index('data-forecast-region="parameters"'), launch.index('data-forecast-region="common"'))
+        self.assertLess(launch.index('data-forecast-allocation-note'), launch.index("renderBridgeControls('launch')"))
+        self.assertLess(launch.index('<section class="forecast-scale-check">'), launch.index("renderBridgeControls('launch')"))
+
+    def test_bridge_controls_use_a_compact_parameter_layout(self):
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("[data-bridge-stage] .forecast-day-allocation{margin-top:0;padding:8px 10px", css)
+        self.assertIn("[data-bridge-stage] .forecast-allocation-inputs{grid-template-columns:repeat(3", css)
+        self.assertIn("[data-bridge-stage]>label{display:grid;grid-template-columns:minmax(150px,.38fr)", css)
+        self.assertIn(".forecast-common-controls [data-bridge-stage]{display:grid", css)
+        self.assertIn("function renderStageCommonControls(stage)", script)
+        self.assertIn("min-height:29px", css)
+
+    def test_steady_missing_lock_days_cover_the_full_steady_period(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("expectedSteadyDates=steadyElapsedDays?Array.from", script)
+        self.assertIn("const compactMissingRanges=dates=>", script)
+        self.assertIn("已结束日交车锁单缺失或无效", script)
+        self.assertIn("交车锁单尚未更新", script)
+        self.assertIn("!daily.has(day)", script)
+        self.assertIn("steadyNotStarted=!!target.steadyStartDate&&target.steadyStartDate>today", script)
+        self.assertIn("if(!message){", script)
+        self.assertIn("const blocked=!!message", script)
+        self.assertIn("平销尚未开始", script)
+        self.assertNotIn("当前周已结束日锁单缺失或异常", script)
+
+    def test_daily_base_curve_explanation_matches_allocation_logic(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
+        self.assertIn("首销每日大定相对D1（基础曲线）", script)
+        self.assertIn("root._forecastDailyEvidence={adaptedDailyOrders,naturalDailyOrders,historicalFactor}", script)
+        self.assertIn("root._forecastDailyEvidence.historicalFactor(item,day)", script)
+        self.assertIn("root._forecastDailyEvidence.targetFactor=index=>", script)
+        self.assertIn("D1=100%，用于未来余量的基础形状", script)
+        self.assertIn("剔除原日期类型系数", module)
+        self.assertIn("两种方法均用主辅加权后的基础曲线衔接前一真实日", module)
+
+    def test_sales_forecast_evidence_uses_compact_reference_comparison_table(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        self.assertIn("参与打分参数", script)
+        self.assertIn("当前 · ${esc(target.name)}", script)
+        self.assertIn("主参考 · ${esc(name(selected[0],'未选择'))}", script)
+        self.assertIn("辅助参考 · ${esc(name(selected[1],'未选择'))}", script)
+        self.assertIn("单项打分", script)
+        self.assertIn("综合得分", script)
+        self.assertIn('<details class="forecast-ref-score-details"><summary>查看评分对比表</summary>', script)
+        self.assertNotIn('<details class="forecast-ref-score-details" open>', script)
+        self.assertIn(".forecast-ref-comparison table", css)
+        self.assertIn(".forecast-ref-score-details>.forecast-ref-comparison", css)
+        self.assertNotIn("reason.textContent=selected.length", script)
+
+    def test_sales_forecast_score_explanations_match_the_components_used(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("D2小转大/D2大定", script)
+        self.assertIn("D1小转大占前两日", script)
+        self.assertIn("D1直接大占前两日", script)
+        self.assertIn("D2单日退订率", script)
+        self.assertIn("/2项可用（留存大定率、大定到锁单率）", script)
+        self.assertNotIn("lockData*3", script)
+        self.assertNotIn("得分${Math.round(part.value*100)}", script)
+
+    def test_sales_forecast_six_logic_fixes_are_observable(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
+        refresh = (ROOT / "tools" / "refresh_sales_forecast_data.py").read_text(encoding="utf-8")
+        self.assertIn("parameterRawSmall", script)
+        self.assertIn("KPI与未来剩余量已同步到真实下限", script)
+        self.assertIn("curveShapeCloseness", script)
+        self.assertIn("D1～当前Dn归一化斜率", script)
+        self.assertIn("不参与参考车型评分", script)
+
+    def test_sales_forecast_has_one_interactive_calculation_owner(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
+        self.assertNotIn("def _match_score", module)
+        self.assertNotIn("def _recommendations", module)
+        self.assertNotIn("window_profile", module)
+        self.assertNotIn("function renderForecastWorkspace(data)", script)
+        self.assertNotIn("function bindForecastWorkspace()", script)
+        self.assertEqual(script.count("const scoreParts="), 1)
+
+    def test_sales_forecast_rebases_horizon_and_separates_past_gaps(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        forecast_math = (ROOT / "templates" / "forecast-math.js").read_text(encoding="utf-8")
+        self.assertIn("const rebasedForecastCompletion=", script)
+        self.assertIn("const extendForecastCurve=", script)
+        self.assertIn("const rebasedForecastCompletionCurve=", script)
+        self.assertIn("comparison?.progressRows?.length", script)
+        self.assertNotIn("values=cumulativeNormalized(values.slice(0,count))", script)
+        self.assertIn("保留头两天、尾两天各日占比，中间按比例拉伸", script)
+        self.assertIn("const adaptedDailyOrders=", script)
+        self.assertIn("past_missing", script)
+        self.assertIn("过期缺失补估", script)
+        self.assertIn("quotas.map(Math.floor)", forecast_math)
+        self.assertIn("参数实时生效", script)
+        self.assertIn('data-forecast-feedback role="status" aria-live="polite"', script)
+        self.assertNotIn("data-forecast-confirm", script)
+        self.assertNotIn("confirmedReferenceSnapshot", script)
+
+    def test_sales_forecast_excludes_delivery_metrics(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
+        refresh = (ROOT / "tools" / "refresh_sales_forecast_data.py").read_text(encoding="utf-8")
+        for text in (script, module, refresh):
+            self.assertNotIn("首销期交付", text)
+            self.assertNotIn("交付/锁单", text)
+            self.assertNotIn("delivery_rate", text)
+        self.assertIn("item?.d1_valid===false", script)
+        self.assertIn('calculated_lock_rate = safe_div(record.get("首销期锁单"), record.get("大定量"))', refresh)
+        self.assertNotIn('calculated_lock_rate = safe_div(lock, net)', refresh)
+        self.assertNotIn('write_rows(workbook, "人工校准参数"', refresh)
+        self.assertNotIn('record.get("参考锁单率")', module)
+
+    def test_sales_forecast_uses_shared_lock_parameter_and_compact_layout(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        refresh = (ROOT / "tools" / "refresh_sales_forecast_data.py").read_text(encoding="utf-8")
+        parameter_block = script.split('forecast-parameter-controls', 1)[1].split('data-forecast-region="common"', 1)[0]
+        self.assertNotIn('data-forecast-input="lock"', parameter_block)
+        self.assertIn('class="forecast-common-lock">大定到锁单率', script)
+        self.assertIn('首销期锁单 ÷ 总大定', script)
+        self.assertIn('"首销期锁单", "大定到锁单率"', refresh)
+        self.assertIn('.forecast-v2 .forecast-ref-grid{grid-template-columns:repeat(2,minmax(0,1fr))', css)
+        self.assertIn('.forecast-common-controls{grid-column:1/-1', css)
+        self.assertLess(script.index('forecast-progress-controls'), script.index('forecast-d1-card'))
+
+    def test_forecast_short_panels_keep_natural_height_and_reference_charts_use_half_width(self):
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn(".forecast-lifecycle-grid{display:grid;grid-template-columns:minmax(300px,.72fr) minmax(0,1.55fr);gap:12px;align-items:start}", css)
+        self.assertIn(".forecast-lifecycle-evidence{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,.7fr);gap:12px;align-items:start}", css)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-control-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start;min-width:0;min-height:0}", css)
+        self.assertIn(".forecast-result-main{display:grid;grid-template-columns:minmax(0,1fr);", css)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-control-grid .forecast-assumptions{min-width:0;", css)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-input-grid label{min-width:0;overflow-wrap:anywhere;", css)
+        self.assertIn("@media(min-width:1001px){.forecast-lifecycle-workspace .forecast-lifecycle-grid{grid-template-columns:minmax(0,1fr)}", css)
+        self.assertIn(".forecast-lifecycle-workspace .forecast-lifecycle-controls{display:grid;grid-template-columns:minmax(220px,.55fr) minmax(0,1.45fr);align-items:center", css)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-progress-controls .forecast-input-grid{grid-template-columns:repeat(2,minmax(0,1fr))}", css)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-parameter-controls .forecast-input-grid{grid-template-columns:repeat(3,minmax(0,1fr))}", css)
+        self.assertIn('.forecast-v2 .forecast-pane[data-forecast-pane="score"].active{min-width:0;max-width:100%;box-sizing:border-box;overflow-x:hidden;overflow-y:auto}', css)
+        self.assertIn(".forecast-v2 .forecast-score-table{min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden}", css)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-ref-grid>.forecast-ref-card:only-child{grid-column:auto}", css)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-small-order .forecast-ref-grid>.forecast-ref-card:nth-child(3):last-child{grid-column:auto}", css)
+        self.assertIn(".forecast-workspace.forecast-v2 .forecast-steady .forecast-ref-grid>.forecast-steady-shared-reference{grid-column:1/-1}", css)
+        self.assertIn('class="forecast-ref-card forecast-steady-shared-reference"', script)
+        self.assertIn(".forecast-workspace.forecast-studio .forecast-steady-shared-reference{grid-template-columns:repeat(2,minmax(0,1fr))}", css)
+        self.assertIn(".forecast-workspace.forecast-studio .forecast-steady-shared-reference>.forecast-steady-chart-note{grid-column:1/-1;", css)
+        self.assertIn(".forecast-workspace.forecast-studio .forecast-steady-shared-reference>.forecast-task-chart{grid-column:auto;margin-top:10px;padding-top:10px;border-color:var(--line)}", css)
+        self.assertIn('grid-row:span 6;grid-template-rows:subgrid;row-gap:0;align-content:start', css)
+        self.assertIn('grid-row:span 2;grid-template-rows:subgrid;align-items:start;row-gap:3px', css)
+        self.assertIn(".forecast-workspace.forecast-studio .forecast-controls-rail>.forecast-scale-check{grid-column:1/-1}", css)
+
+    def test_history_tables_follow_the_top_grain_without_local_selector(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("const current=options[state.grain]?state.grain", script)
+        self.assertNotIn("data-history-select", script)
+        self.assertNotIn("history-toolbar", script)
+
+    def test_sales_forecast_blocks_both_methods_on_raw_data_errors(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        self.assertIn('data-forecast-data-error role="alert" aria-live="assertive"', script)
+        self.assertIn("rawDataError", script)
+        math_script = (ROOT / "templates" / "forecast-math.js").read_text(encoding="utf-8")
+        self.assertIn("const available=!rawDataError", math_script)
+        self.assertIn("const available=!rawDataError&&historyComplete", math_script)
+        self.assertIn("showForecastCondition", script)
+        self.assertIn("其他可用方法及已知实际数据保留", script)
+        self.assertIn("hasSmall?(Number.isSafeInteger(small)&&small>0&&baseConversion>0&&baseConversion<=1&&baseShare>=0&&baseShare<1)", math_script)
+        self.assertIn(".forecast-data-error", css)
+
+
+    def test_forecast_workflow_is_discoverable_and_details_remain_available(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn('class="forecast-target-settings"', script)
+        self.assertIn('class="forecast-source-details"', script)
+        self.assertIn('data-forecast-stage-switch=', script)
+        self.assertNotIn('data-forecast-jump="curve"', script)
+        self.assertNotIn('data-forecast-jump="import"', script)
+        self.assertNotIn('class="forecast-quick-actions forecast-result-actions"', script)
+        self.assertIn('data-forecast-import-file', script)
+        self.assertIn("role:'reference',dashed:true", script)
+        self.assertIn("hourly:!!spec.hourly,extra:'',table:true", script)
+        self.assertIn("D1、D2及最后两天的日占比保持不变", script)
+        header = script.split('<section class="forecast-target">', 1)[1].split('</section>', 1)[0]
+        self.assertNotIn("data-forecast-jump", header)
+
+    def test_raw_search_has_live_count_empty_state_and_mobile_picker(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn('id="rawMatchCount" role="status" aria-live="polite"', script)
+        self.assertIn('id="rawEmpty"', script)
+        self.assertIn('id="clearRawSearch"', script)
+        self.assertIn('id="rawFile" aria-label="选择底表文件"', script)
+        self.assertIn('$("#rawEmpty").hidden=filtered.length>1', script)
+
+    def test_import_boundary_dates_follow_the_selected_stage(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn('return windows[preferred]?preferred:', script)
+        self.assertIn("metric,quantity,stage:metric==='small'", script)
+        self.assertIn('stageFor(row.date,target,stage)===stage', script)
+        self.assertIn("status.dataset.state='error'", script)
+
+    def test_navigation_discards_stale_pages_and_source_jump_preserves_back_path(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn('revision!==pageRevision||moduleId!==state.module', script)
+        self.assertIn('revision!==rawRenderRevision||state.module!=="raw"', script)
+        source_jump = script.split('async function jumpToSource(source)', 1)[1].split('function showToast', 1)[0]
+        self.assertIn('captureForecastDraft()', source_jump)
+        self.assertIn('await renderAll();syncUrl("push")', source_jump)
+
+    def test_forecast_manual_drafts_and_imports_are_saved_locally(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("const forecastStorageKey='sales-forecast-independent-v1:'+location.pathname", script)
+        self.assertIn("localStorage.setItem(forecastStorageKey", script)
+        self.assertIn("localStorage.getItem(forecastStorageKey)", script)
+        self.assertIn("root._forecastTouched?.has(forecastDraftControlKey(control))", script)
+        self.assertIn("root._forecastRestoreDraft?.(draft.meta||{})", script)
+        self.assertIn("data-forecast-reset", script)
+        self.assertIn("本机保存失败", script)
+
+    def test_import_merge_identity_includes_stage_and_explicit_replace_is_confirmed(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn('<option value="merge">合并（同指标同日更新）</option>', script)
+        self.assertIn("mode==='replace'&&previous?.rows.length&&!window.confirm(", script)
+        self.assertIn("const key=metricOf(row)+'|'+row.date", script)
+        self.assertIn("source:file.name", script)
+
+    def test_vehicle_parameters_stay_expanded_at_all_widths(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        self.assertIn('<div class="forecast-target-settings" role="group" aria-label="车型与时间参数">', script)
+        self.assertNotIn('<details class="forecast-target-settings">', script)
+        self.assertIn('grid-template-columns:repeat(7,minmax(0,1fr))', css)
+        self.assertIn('grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:5px 7px', css)
+        self.assertIn('grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:5px 6px', css)
+
+
+    def test_forecast_source_brief_stays_outside_collapsible_details(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        header = script.split('<section class="forecast-target">', 1)[1].split('</section>', 1)[0]
+        for marker in ('data-forecast-source-brief', 'data-forecast-time-brief'):
+            self.assertLess(header.index(marker), header.index('<details class="forecast-source-details">'))
+        self.assertIn('<summary>来源与时间详情</summary>', header)
+        self.assertIn('data-forecast-day-source', header)
+        self.assertIn('data-forecast-time-summary', header)
+        self.assertGreaterEqual(script.count('refreshForecastHeaderBrief(root)'), 3)
+
+    def test_forecast_secondary_tabs_are_lightweight_and_keyboard_visible(self):
+        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        block = css.split('/* One stage entry point, followed by an aligned content-view switcher. */', 1)[1]
+        primary = re.search(r'\.forecast-stage-switcher button\[aria-pressed=true\]\{([^}]+)\}', block).group(1)
+        secondary = re.search(r'\.forecast-target-tabs button\[aria-selected=true\]\{([^}]+)\}', block).group(1)
+        self.assertIn('background:#0d63ce', primary)
+        self.assertIn('background:transparent', secondary)
+        self.assertIn('border-bottom-color:#0d63ce', secondary)
+        self.assertIn('border-left:1px solid #ccdae8', block)
+        self.assertIn('.forecast-target-tabs button:focus-visible', block)
+        self.assertIn('display:flex;flex-wrap:wrap;align-items:center', block)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for display formatter checks")
+    def test_forecast_source_brief_preserves_mixed_sources_errors_and_judgement_date(self):
+        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        helpers = script[script.index("  function forecastSourceBrief(text){"):
+                         script.index("  function showForecastStageSummary(")]
+        checks = r"""
+const assert=require('node:assert/strict');
+assert.equal(forecastSourceBrief('首销期已结束；主来源小订及首销数据整理（预测基准总表）；字段来源：首销日明细：小订及首销数据整理；总小订：小订及首销数据整理；分时进度：首销期订单节奏'),
+  '混合来源：整理表＋首销节奏');
+assert.equal(forecastSourceBrief('主来源小订及首销数据整理（预测基准总表）；字段来源：总小订：小订及首销数据整理'),
+  '来源：整理表');
+assert.equal(forecastSourceBrief('最终总小订取自小订及首销数据整理。逐日形状使用“小订by天”真实曲线。'),
+  '总小订：整理表');
+assert.equal(forecastSourceBrief('已发生4个完整日；分时累计仅作参考'), '实绩：4个完整日');
+assert.equal(forecastSourceBrief('主辅参考车型测算'), '参考测算');
+assert.equal(forecastSourceBrief('已结束日锁单缺失或异常（共490天）'), '数据缺失/异常');
+const source={textContent:'已结束日锁单缺失或异常（共490天）'},
+      time={textContent:'判定日期2026-09-23（数据生成于2026-09-22 09:57）；首销窗口2025-03-20 ~ 2025-05-06'},
+      brief={dataset:{}},date={};
+const nodes={'[data-forecast-day-source]':source,'[data-forecast-time-summary]':time,
+ '[data-forecast-source-brief]':brief,'[data-forecast-time-brief]':date};
+const root={querySelector:selector=>nodes[selector]};
+refreshForecastHeaderBrief(root);
+assert.equal(date.textContent,'判定日 2026-09-23');
+assert.equal(date.title,time.textContent);
+assert.equal(brief.title,source.textContent);
+assert.equal(brief.dataset.warning,'true');
+source.textContent='主辅参考车型测算';
+refreshForecastHeaderBrief(root);
+assert.equal(brief.dataset.warning,'false');
+assert.equal(brief.textContent,'参考测算');
+assert.equal(source.textContent,'主辅参考车型测算');
+assert.doesNotThrow(()=>refreshForecastHeaderBrief({querySelector:()=>null}));
+"""
+        result = subprocess.run(
+            [shutil.which("node"), "-e", helpers + checks],
+            capture_output=True, text=True, encoding="utf-8", timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+if __name__ == "__main__":
+    unittest.main()

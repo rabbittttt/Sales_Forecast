@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+.venv/
+node_modules/
+.test_runtime/
+.test_outputs/
+.migration/
+output_file/
+analysis_outputs/
+*.xlsx
+*.xls
+*.csv
+*.log

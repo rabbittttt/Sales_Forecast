@@ -1,0 +1,20 @@
+{
+  "title": "鸿蒙智行销量预测",
+  "chart_render_mode": "generated",
+  "refresh_sales_forecast_data_before_build": true,
+  "forecast_as_of_date": "",
+  "build_manifest_mode": "off",
+  "module_order": [
+    "sales_forecast",
+    "raw"
+  ],
+  "module_labels": {
+    "sales_forecast": "销量预测",
+    "raw": "底表中心"
+  },
+  "grain_labels": {
+    "day": "日",
+    "week": "周",
+    "month": "月"
+  }
+}
