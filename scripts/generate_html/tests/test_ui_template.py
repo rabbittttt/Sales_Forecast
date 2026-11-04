@@ -439,7 +439,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
     def test_brand_logo_is_embedded_as_an_accessible_decorative_image(self):
         template = (ROOT / "templates" / "dashboard.html").read_text(encoding="utf-8")
         self.assertIn('class="brand-mark" src="__BRAND_LOGO__" alt="" aria-hidden="true"', template)
-        self.assertTrue((ROOT / "templates" / "forecast-icon.svg").exists())
+        self.assertTrue((ROOT / "templates" / "brand-logo.png").exists())
 
     def test_config_supports_either_chart_source_and_requested_module_order(self):
         config = load_config(ROOT / "config.json")
