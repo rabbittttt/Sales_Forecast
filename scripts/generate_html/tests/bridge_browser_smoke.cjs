@@ -59,7 +59,7 @@ const templates=path.resolve(__dirname,'../templates');
  await page.waitForFunction(()=>document.querySelector('[data-forecast-import="launch"] [data-forecast-import-status]').textContent.includes('导入失败'));
  assert((await importPanel.locator('[data-forecast-import-result]').textContent()).includes('123'));
  const {execFileSync}=require('child_process');
- const xlsx=execFileSync('python',['-c',"import io,base64,datetime; from openpyxl import Workbook; w=Workbook(); s=w.active; s.append(['车型','日期','预测数量']); s.append(['current',datetime.date(2026,9,4),456]); b=io.BytesIO(); w.save(b); print(base64.b64encode(b.getvalue()).decode())"],{encoding:'utf8'}).trim();
+ const xlsx=execFileSync(require('./shared_python.cjs')(process.env.PYTHON_BINARY),['-c',"import io,base64,datetime; from openpyxl import Workbook; w=Workbook(); s=w.active; s.append(['车型','日期','预测数量']); s.append(['current',datetime.date(2026,9,4),456]); b=io.BytesIO(); w.save(b); print(base64.b64encode(b.getvalue()).decode())"],{encoding:'utf8'}).trim();
  await importPanel.locator('[data-forecast-import-file]').setInputFiles({name:'forecast.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(xlsx,'base64')});
  await page.waitForFunction(()=>document.querySelector('[data-forecast-import="launch"] [data-forecast-import-status]').textContent.includes('导入成功'));
  assert((await importPanel.locator('[data-forecast-import-result]').textContent()).includes('456'));

@@ -57,7 +57,7 @@ const {chromium}=require(path.join(project,'.test_runtime/node_modules/playwrigh
    }
    await context.close();
   }
-  const fixture=execFileSync(process.env.PYTHON_EXE||'python',['-c',
+  const fixture=execFileSync(require('./shared_python.cjs')(process.env.PYTHON_EXE),['-c',
    "import json;from tests.test_audit_20261019 import SkuPeriodAlignmentTests; t=SkuPeriodAlignmentTests(); scenarios={};\ntry:\n for key,periods in [('shifted',['26WK02','26WK03']),('cumulative_only',['26WK02','26WK03','26WK04']),('share_only',['26WK01','26WK02'])]:\n  scenarios[key]=t.build(['26WK01','26WK02','26WK03'],periods)[0]\n print(json.dumps(scenarios,ensure_ascii=False))\nfinally:t.doCleanups()"
   ],{cwd:root,encoding:'utf8',env:{...process.env,PYTHONUTF8:'1'}});
   const views=JSON.parse(fixture);

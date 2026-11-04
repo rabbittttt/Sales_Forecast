@@ -6,19 +6,18 @@
 
 ## 运行
 
-新电脑先安装 Python 3.10 或更新版本，并将其加入 PATH。在本项目目录创建独立环境并安装依赖：
+所有项目默认共用所在 `Project/.venv`。新电脑先安装 Python 3.11 或更新版本（共享环境要求），在 `Project` 根目录双击“初始化共享环境.cmd”重建共享环境并安装依赖。项目位于 `Project/销量预测/` 时，也可在本项目目录手动安装依赖、启动：
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe main.py
+..\.venv\Scripts\python.exe -m pip install -r requirements.txt
+..\.venv\Scripts\python.exe main.py
 ```
 
-换电脑后应重新创建 `.venv`，不要直接复制旧电脑的虚拟环境。代码与业务文件分别迁移，保留项目与共享目录的相对位置。
+换电脑后应重新创建 `Project/.venv`，不要直接复制旧电脑的虚拟环境。整体移动 `Project` 时保留项目与共享目录的相对位置；`Project` 的上级目录和盘符可以不同。
 
-`运行销量预测.bat` 优先使用本项目 `.venv\Scripts\python.exe`，没有项目环境时使用 PATH 中的 Python，并在启动前检查版本和依赖。可用 `SALES_FORECAST_PYTHON` 指定其他解释器文件；相对路径按本项目目录解析。启动窗口会显示所选 Python；显式路径无效、项目 `.venv` 不完整或所选环境缺依赖时会提示并停止，不自动安装或换用其他环境。
+`运行销量预测.bat` 从脚本所在目录向上找到最近名为 `Project` 的目录，固定使用其中 `.venv\Scripts\python.exe`，忽略子项目自己的 `.venv`，也不回退 PATH 或 Codex Python。可用 `SALES_FORECAST_PYTHON` 显式指定其他解释器文件；相对路径按本项目目录解析。启动窗口显示所选 Python，并在环境缺失或依赖不全时停止，提示初始化或安装命令。
 
-也可双击根目录的“运行销量预测.bat”。只生成文件、不打开浏览器：`python main.py --no-open`。
+也可双击根目录的“运行销量预测.bat”。只生成文件、不打开浏览器：`..\.venv\Scripts\python.exe main.py --no-open`。
 也可直接运行 `scripts/generate_html/main.py`。启动位置不影响默认输入、输出路径。
 
 生成结果：`output_file/鸿蒙智行销量预测.html`。
@@ -46,14 +45,16 @@ python -m venv .venv
 
 历史功能说明见 `docs/原预测功能说明.md`；其中旧目录、双页构建、订单分析发布和 Git 远端说明已失效，路径与运行方式以本文件为准。
 
+浏览器测试生成 Python 夹具时也默认使用所在 `Project/.venv`；既有 `PYTHON_EXE`、`PYTHON_BINARY` 可显式覆盖。带目录的相对值按本项目根目录解析，显式命令名保持兼容。
+
 ```powershell
 cd scripts/generate_html
-python -m compileall -q core modules tools main.py
+..\..\..\.venv\Scripts\python.exe -m compileall -q core modules tools main.py
 node --check templates/dashboard.js
 node --check templates/forecast-math.js
 node --check templates/forecast-import.js
-python -m unittest discover -s tests
-python main.py --no-open --check
+..\..\..\.venv\Scripts\python.exe -m unittest discover -s tests
+..\..\..\.venv\Scripts\python.exe main.py --no-open --check
 ```
 
 `--check` 遇到数据质量警告会返回非零状态；请查看日志中的具体数据定位。
