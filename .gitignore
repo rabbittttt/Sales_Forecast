@@ -13,3 +13,6 @@ analysis_outputs/
 *.xls
 *.csv
 *.log
+
+# Local update helper.
+update_script.bat
