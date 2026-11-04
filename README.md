@@ -6,10 +6,17 @@
 
 ## 运行
 
+新电脑先安装 Python 3.10 或更新版本，并将其加入 PATH。在本项目目录创建独立环境并安装依赖：
+
 ```powershell
-python -m pip install -r requirements.txt
-python main.py
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe main.py
 ```
+
+换电脑后应重新创建 `.venv`，不要直接复制旧电脑的虚拟环境。代码与业务文件分别迁移，保留项目与共享目录的相对位置。
+
+`运行销量预测.bat` 优先使用本项目 `.venv\Scripts\python.exe`，没有项目环境时使用 PATH 中的 Python，并在启动前检查版本和依赖。可用 `SALES_FORECAST_PYTHON` 指定其他解释器文件；相对路径按本项目目录解析。启动窗口会显示所选 Python；显式路径无效、项目 `.venv` 不完整或所选环境缺依赖时会提示并停止，不自动安装或换用其他环境。
 
 也可双击根目录的“运行销量预测.bat”。只生成文件、不打开浏览器：`python main.py --no-open`。
 也可直接运行 `scripts/generate_html/main.py`。启动位置不影响默认输入、输出路径。
