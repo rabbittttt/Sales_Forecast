@@ -1,5 +1,7 @@
 # 销量预测
 
+公共代码仓库：[rabbittttt/Sales_Forecast](https://github.com/rabbittttt/Sales_Forecast)。
+
 本目录是独立项目。代码、模板、配置、预测算法、测试、浏览器草稿、派生汇总、网页资源和日志均由本项目维护，不导入或调用“订单分析”的代码。
 
 ## 运行
