@@ -20,7 +20,7 @@ from openpyxl import load_workbook
 from core.components import add_kpi_comparisons
 from core.china_calendar import PUBLISHED_YEARS
 from core.config import load_config
-from core.data_paths import orders_input_directory, assert_output_is_private
+from core.data_paths import orders_input_directory, assert_output_is_private, forecast_summary_path, assert_summary_output, project_output_directory
 from core.discovery import discover_subjects, set_capabilities
 from core.excel import WorkbookItem, WorkbookStore, clean_text, format_excel_cell, load_data_workbook, reset_conflict_diagnostics
 from core.forecast_summary import SUMMARY_NAME, visible_target_names
@@ -107,7 +107,7 @@ def relay_refresh_line(line: str, previous_level: int = logging.INFO) -> int:
     return level
 
 
-def refresh_sales_forecast_data(config: dict[str, Any], input_dir: Path | None = None, output_dir: Path | None = None) -> None:
+def refresh_sales_forecast_data(config: dict[str, Any], input_dir: Path | None = None) -> None:
     """Optionally rebuild the secondary forecast workbook with this Python runtime."""
     if not config.get("refresh_sales_forecast_data_before_build", False):
         LOGGER.info("销量预测二次处理刷新：已按 config.json 跳过")
@@ -124,8 +124,7 @@ def refresh_sales_forecast_data(config: dict[str, Any], input_dir: Path | None =
         command.append("--debug")
     if input_dir is not None:
         command.extend(["--orders", str(input_dir.resolve())])
-    summary_path = (output_dir or PROJECT_ROOT / "output_file") / SUMMARY_NAME
-    assert_output_is_private(summary_path)
+    summary_path = assert_summary_output(forecast_summary_path(PROJECT_ROOT))
     command.extend(["--output", str(summary_path.resolve())])
     if config.get("forecast_as_of_date"):
         command.extend(["--as-of-date", str(config["forecast_as_of_date"])])
@@ -332,9 +331,9 @@ def build(
     if manifest_mode not in {"compact", "full", "off"}:
         raise ValueError("config.json 的 build_manifest_mode 必须是 compact、full 或 off")
     stage_started = perf_counter()
-    refresh_sales_forecast_data(config, input_dir, output_file.parent)
+    refresh_sales_forecast_data(config, input_dir)
     refresh_seconds = perf_counter() - stage_started
-    summary_path = output_file.parent / SUMMARY_NAME
+    summary_path = forecast_summary_path(PROJECT_ROOT)
     cache_dir = output_file.parent / ".cache" / "excel"
     store = WorkbookStore(input_dir, cache_dir=cache_dir)
     stage_started = perf_counter()
@@ -543,6 +542,9 @@ def main() -> int:
         return 1
     finally:
         cleanup_input_cache(args.output.parent)
+        refresh_output_dir = project_output_directory(PROJECT_ROOT)
+        if args.output.parent.resolve() != refresh_output_dir.resolve():
+            cleanup_input_cache(refresh_output_dir)
     errors = DIAGNOSTIC_COUNTS["ERROR"]
     if errors:
         LOGGER.error("生成不完整：发生%d条错误；已保留可用HTML供排查，不自动打开: %s",

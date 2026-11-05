@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
 
 from core.china_calendar import calendar_payload
-from core.data_paths import project_output_directory, forecast_reference_directory, model_information_directory
+from core.data_paths import forecast_summary_path, forecast_reference_directory, model_information_directory
 from core.model_identity import model_key, usable_attribute, stage_records, stage_name, parent_generation, stage_label, resolve_stage_identity, generation_records, has_reservation, FORECAST_SOURCE_PATH
 from core.excel import cell_source_text, join_source_texts, covered_date_source_text, _source_date_ranges, display_period, grain_from_sheet, is_aggregate_generation, parse_metric_sheet, sheet_subject, subject_type, compact_diagnostic_ranges
 from core.models import Dashboard, SourceRef, Subject
@@ -29,7 +29,7 @@ RAW_FORECAST_DATA = FORECAST_SOURCE_PATH
 MODEL_INFORMATION_ROOT = model_information_directory(PROJECT_ROOT)
 MODEL_MASTER_PATH = MODEL_INFORMATION_ROOT / "车型基本信息.xlsx"
 HISTORY_CANDIDATES = (
-    project_output_directory(PROJECT_ROOT) / SUMMARY_NAME,
+    forecast_summary_path(PROJECT_ROOT),
     RAW_FORECAST_DATA,
     FORECAST_INPUT_ROOT / "小订及首销期数据整理.xlsx",
     FORECAST_INPUT_ROOT / "小订及首销期历史基准.xlsx",
@@ -3231,7 +3231,7 @@ class SalesForecastModule:
 
     def __init__(self) -> None:
         self.as_of_date: date | None = None
-        self.summary_path = project_output_directory(PROJECT_ROOT) / SUMMARY_NAME
+        self.summary_path = forecast_summary_path(PROJECT_ROOT)
 
     def set_config(self, config: dict[str, Any]) -> None:
         """Apply the optional manual date without changing source data."""

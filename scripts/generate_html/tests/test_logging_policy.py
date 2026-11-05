@@ -363,5 +363,7 @@ class LoggingPolicyTests(TestCase):
             with self.assertRaisesRegex(RuntimeError, '退出码 1'):
                 main.refresh_sales_forecast_data({'refresh_sales_forecast_data_before_build': True})
         self.assertEqual(len(observed), 2)
-        self.assertIn('-u', popen.call_args.args[0])
+        command = popen.call_args.args[0]
+        self.assertIn('-u', command)
+        self.assertEqual(command[command.index('--output') + 1], str(main.forecast_summary_path(main.PROJECT_ROOT).resolve()))
         self.assertEqual(popen.call_args.kwargs['stderr'], main.subprocess.STDOUT)

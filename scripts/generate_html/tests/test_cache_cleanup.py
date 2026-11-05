@@ -72,20 +72,24 @@ class CacheCleanupTests(unittest.TestCase):
             self.assertTrue(cache.exists())
             self.assertIn("运行缓存未能清理", "\n".join(logs.output))
 
-    def test_main_cleans_only_private_output_cache(self):
+    def test_main_cleans_html_and_refresh_caches_and_preserves_shared_cache(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             shared, private = root / "shared-input", root / "private-output"
             shared_cache, private_cache = self.make_files(shared), self.make_files(private)
+            refresh_output = root / "project-output"
+            refresh_cache = self.make_files(refresh_output)
             args = argparse.Namespace(input=shared, output=private / "dashboard.html", debug=False,
                                       check=True, no_open=True, disable_sales_forecast=False)
             with patch.object(generator, "parse_args", return_value=args), \
                  patch.object(generator, "configure_runtime", return_value=private / "log/run.log"), \
                  patch.object(generator, "build", return_value=({"subjects": [], "dashboards": {}}, [])), \
+                 patch.object(generator, "project_output_directory", return_value=refresh_output), \
                  patch.dict(generator.DIAGNOSTIC_COUNTS, {"WARNING": 0, "ERROR": 0}):
                 self.assertEqual(generator.main(), 0)
             self.assertTrue(shared_cache.exists())
             self.assertFalse(private_cache.exists())
+            self.assertFalse(refresh_cache.exists())
             self.assertEqual((shared / "source.xlsx").read_bytes(), b"original data")
 
     def test_main_cleans_cache_on_success_failure_validation_and_interrupt(self):
@@ -102,6 +106,7 @@ class CacheCleanupTests(unittest.TestCase):
                     stack.enter_context(patch.object(generator, "configure_runtime", return_value=root / "log" / "run.log"))
                     stack.enter_context(patch.object(generator, "build", return_value=(manifest, warnings), side_effect=error))
                     stack.enter_context(patch.object(generator, "LOGGER"))
+                    stack.enter_context(patch.object(generator, "project_output_directory", return_value=root))
                     if isinstance(error, KeyboardInterrupt):
                         with self.assertRaises(KeyboardInterrupt):
                             generator.main()

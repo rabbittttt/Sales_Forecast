@@ -1,4 +1,4 @@
-"""Shared inputs remain read-only; private forecast summaries remain exportable."""
+"""Shared summaries stay raw-only; local stale copies are not read."""
 import base64
 from contextlib import ExitStack
 from pathlib import Path
@@ -35,7 +35,7 @@ class ForecastSourceLocationTests(TestCase):
                                         side_effect=lambda manifest, templates, output:
                                         output.write_text('generated', encoding='utf-8')))
 
-    def test_shared_summary_is_ignored_and_only_private_summary_is_exported(self):
+    def test_shared_summary_is_exported_and_private_stale_copy_is_ignored(self):
         for disabled in (False, True):
             with self.subTest(disabled=disabled), TemporaryDirectory() as folder, ExitStack() as stack:
                 root = Path(folder)
@@ -46,12 +46,13 @@ class ForecastSourceLocationTests(TestCase):
                 source = inputs / FORECAST_SOURCE_PATH.name
                 private_summary = outputs / SUMMARY_NAME
                 self.write_book(source, '智界 R9 2027款')
-                self.write_book(private_summary, '问界 M1 2027款')
+                private_summary.write_bytes(b'stale local summary must never be read')
                 shared_summary = inputs / SUMMARY_NAME
-                shared_summary.write_bytes(b'stale shared summary must never be read')
+                self.write_book(shared_summary, '问界 M1 2027款')
                 original_bytes = {p: p.read_bytes() for p in inputs.iterdir()}
                 original_bytes[private_summary] = private_summary.read_bytes()
                 self.patch_build(stack)
+                stack.enter_context(patch.object(generator, 'forecast_summary_path', return_value=shared_summary))
                 observed = []
 
                 def observe(store, subject):
@@ -67,7 +68,7 @@ class ForecastSourceLocationTests(TestCase):
                 raw_files = manifest['raw_files']
                 self.assertCountEqual([file['name'] for file in raw_files],
                                       [ordinary.name, source.name, private_summary.name])
-                for source_path, sheet in ((source, '智界 R9 2027款'), (private_summary, '问界 M1 2027款')):
+                for source_path, sheet in ((source, '智界 R9 2027款'), (shared_summary, '问界 M1 2027款')):
                     raw = next(file for file in raw_files if file['name'] == source_path.name)
                     self.assertEqual([s['source_sheet'] for s in raw['sheets']], [sheet])
                     self.assertEqual(base64.b64decode(manifest['raw_blocks'][raw['workbook_key']]),
@@ -75,6 +76,7 @@ class ForecastSourceLocationTests(TestCase):
                 self.assertEqual({p: p.read_bytes() for p in inputs.iterdir()},
                                  {p: data for p, data in original_bytes.items() if p.parent == inputs})
                 self.assertFalse((inputs / '.cache').exists())
+                self.assertEqual(private_summary.read_bytes(), original_bytes[private_summary])
 
     def test_auxiliary_workbooks_alone_do_not_count_as_analysis_inputs(self):
         with TemporaryDirectory() as folder, ExitStack() as stack:

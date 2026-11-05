@@ -34,14 +34,15 @@ from core.forecast_summary import SUMMARY_NAME, INDEX_SHEET, GUIDE_SHEET, DAILY_
 from core.forecast_summary import GROSS_DAILY_SHEET, GROSS_PROGRESS_SHEET, LAUNCH_CANCEL_SHEET, LAUNCH_CANCEL_DAILY_SHEET, SMALL_CANCEL_SHEET, SMALL_CANCEL_DAILY_SHEET
 from core.excel import WorkbookItem, _source_date_range, grain_from_sheet, load_data_workbook, compact_diagnostic_ranges, reset_conflict_diagnostics
 from core.data_paths import (orders_input_directory, model_information_directory,
-                             project_output_directory, excel_cache_directory, assert_output_is_private)
+                             forecast_summary_path, excel_cache_directory, assert_output_is_private,
+                             assert_summary_output)
 
 CODE_ROOT = GENERATE_HTML_ROOT.parent
 PROJECT_ROOT = CODE_ROOT.parent if CODE_ROOT.name.lower() == "scripts" else CODE_ROOT
 FORECAST_INPUT_ROOT = model_information_directory(PROJECT_ROOT)
 DEFAULT_SOURCE = FORECAST_SOURCE_PATH
 DEFAULT_ORDERS = orders_input_directory(PROJECT_ROOT)
-DEFAULT_OUTPUT = project_output_directory(PROJECT_ROOT) / SUMMARY_NAME
+DEFAULT_OUTPUT = forecast_summary_path(PROJECT_ROOT)
 DEFAULT_MAPPING = DEFAULT_SOURCE
 LEGACY_MAPPINGS = (
     FORECAST_INPUT_ROOT / "传播代际名映射.xlsx",
@@ -774,7 +775,7 @@ def mapping_record_for(
 
 
 def build_secondary(source: Path, output: Path, mapping_path: Path, orders_dir: Path | None = None, as_of_date: str = "") -> None:
-    output = assert_output_is_private(output)
+    output = assert_summary_output(output)
     if output in {source.resolve(), mapping_path.resolve()}:
         raise ValueError(f"汇总输出不能覆盖来源文件：{output}")
     started = perf_counter()
@@ -1102,7 +1103,7 @@ def build_secondary(source: Path, output: Path, mapping_path: Path, orders_dir: 
     if orders_dir is not None:
         stage_started = perf_counter()
         append_forecast_inputs(workbook, source, mapping_path, orders_dir, as_of_date,
-                               preserve_layout=False, cache_dir=output.parent / ".cache" / "excel")
+                               preserve_layout=False, cache_dir=excel_cache_directory())
         # These source copies feed both the roster and raw small-order history.
         # Do not let an invalid copied value bypass the normalized baseline.
         copied_summaries = [r.get("汇总Sheet") for r in table_records(workbook, INDEX_SHEET)
@@ -1946,7 +1947,7 @@ def main() -> int:
     args = parse_args()
     configure_refresh_logging(args.debug)
     try:
-        args.output = assert_output_is_private(args.output)
+        args.output = assert_summary_output(args.output)
         args.source = resolve_source_path(args.source)
         if args.mapping == DEFAULT_MAPPING:
             args.mapping = args.source  # One integrated source, including custom --source.

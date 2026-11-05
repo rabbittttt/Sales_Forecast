@@ -153,13 +153,15 @@ class StandaloneForecastTests(TestCase):
                 stack.enter_context(patch.object(generator, "raw_tables", return_value=(self.fixture()["raw_files"], self.fixture()["raw_blocks"])))
                 stack.enter_context(patch.object(generator, "add_kpi_comparisons"))
                 stack.enter_context(patch.object(generator, "validate_manifest", return_value=[]))
+                shared_summary = root / "shared" / generator.SUMMARY_NAME
+                stack.enter_context(patch.object(generator, "forecast_summary_path", return_value=shared_summary))
                 output = root / FORECAST_PAGE_NAME
                 (root / FORECAST_PAGE_NAME).write_text("stale previous forecast", encoding="utf-8")
                 manifest, _ = generator.build(root, output, disable_sales_forecast=disabled)
                 self.assertEqual(refresh.call_count, 1)
                 self.assertEqual(refresh.call_args.args[0]["refresh_sales_forecast_data_before_build"], not disabled)
-                self.assertEqual(refresh.call_args.args[2], output.parent)
-                self.assertEqual(modules[0].summary_path, output.parent / generator.SUMMARY_NAME)
+                self.assertEqual(refresh.call_args.args[1], root)
+                self.assertEqual(modules[0].summary_path, shared_summary)
                 self.assertEqual(modules[0].build.call_count, 0 if disabled else len(subjects))
                 forecast_meta, forecast_boards, forecast_raw = embedded(output)
                 self.assertEqual(forecast_meta["app_mode"], "forecast")

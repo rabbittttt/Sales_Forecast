@@ -1,4 +1,4 @@
-"""A forecast run reads shared inputs but owns its outputs and caches."""
+"""The summary is shared while HTML, caches and original inputs stay isolated."""
 
 import hashlib
 import os
@@ -35,22 +35,31 @@ class ProjectPathIsolationTests(TestCase):
             project = Path(directory) / "销量预测"
             self.assertEqual(data_paths.shared_data_root(project), (project.parent / "数据源").resolve())
 
-    def test_summary_defaults_are_private_and_history_excludes_shared_derivatives(self):
-        expected = data_paths.project_output_directory() / SUMMARY_NAME
+    def test_summary_defaults_are_shared_and_history_uses_the_same_workbook(self):
+        expected = data_paths.orders_input_directory() / SUMMARY_NAME
+        self.assertEqual(data_paths.forecast_summary_path(), expected)
         self.assertEqual(refresh.DEFAULT_OUTPUT, expected)
         self.assertEqual(SalesForecastModule().summary_path, expected)
         self.assertEqual(HISTORY_CANDIDATES[0], expected)
-        shared = data_paths.shared_data_root()
-        derived_names = {SUMMARY_NAME, "销量预测数据汇总.xlsx", "小订及首销预测二次处理.xlsx"}
-        self.assertFalse(any(path.is_relative_to(shared) and path.name in derived_names for path in HISTORY_CANDIDATES))
+        local = data_paths.project_output_directory() / SUMMARY_NAME
+        self.assertNotIn(local, HISTORY_CANDIDATES)
+        self.assertFalse(data_paths.excel_cache_directory().is_relative_to(data_paths.shared_data_root()))
 
-    def test_shared_output_and_cache_are_rejected_before_writing(self):
+    def test_only_the_shared_summary_can_be_written_and_caches_stay_private(self):
         with TemporaryDirectory() as directory:
-            shared = Path(directory) / "共享输入"
+            shared = (Path(directory) / "共享输入").resolve()
             output = shared / "订单汇总" / SUMMARY_NAME
             with patch.dict(os.environ, {"SHARED_DATA_ROOT": str(shared)}):
+                self.assertEqual(data_paths.assert_summary_output(output), output)
+                local = Path(directory) / "custom-summary.xlsx"
+                self.assertEqual(data_paths.assert_summary_output(local), local.resolve())
+                for forbidden in (shared / "订单汇总" / "小订及首销数据整理.xlsx",
+                                  shared / "车型信息" / SUMMARY_NAME,
+                                  shared / "订单汇总" / "other.xlsx"):
+                    with self.subTest(path=forbidden), self.assertRaisesRegex(ValueError, "只读"):
+                        refresh.build_secondary(Path("unused.xlsx"), forbidden, Path("mapping.xlsx"))
                 with self.assertRaisesRegex(ValueError, "只读"):
-                    refresh.build_secondary(Path("unused.xlsx"), output, Path("mapping.xlsx"))
+                    data_paths.assert_output_is_private(output)
                 with self.assertRaisesRegex(ValueError, "只读"):
                     WorkbookStore(shared, cache_dir=shared / ".cache")
                 self.assertFalse(shared.exists())

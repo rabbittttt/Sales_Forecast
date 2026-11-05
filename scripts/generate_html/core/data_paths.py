@@ -1,4 +1,4 @@
-"""Shared source inputs are read-only; derived files belong to this project."""
+"""Shared inputs and the published summary; private reports and caches."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 CODE_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = CODE_ROOT.parent if CODE_ROOT.name.lower() == "scripts" else CODE_ROOT
+FORECAST_SUMMARY_NAME = "鸿蒙智行销量数据汇总.xlsx"
 
 
 def shared_data_root(project_root: Path = PROJECT_ROOT) -> Path:
@@ -24,6 +25,11 @@ def shared_data_root(project_root: Path = PROJECT_ROOT) -> Path:
 
 def orders_input_directory(project_root: Path = PROJECT_ROOT) -> Path:
     return shared_data_root(project_root) / "订单汇总"
+
+
+def forecast_summary_path(project_root: Path = PROJECT_ROOT) -> Path:
+    """The shared derived workbook published by this forecast project."""
+    return orders_input_directory(project_root) / FORECAST_SUMMARY_NAME
 
 
 def forecast_reference_directory(project_root: Path = PROJECT_ROOT) -> Path:
@@ -44,6 +50,18 @@ def assert_output_is_private(path: Path, project_root: Path = PROJECT_ROOT) -> P
     if any(resolved.is_relative_to(root) for root in shared_roots):
         raise ValueError(f"共享数据目录只读，输出或缓存必须放在项目输出目录：{resolved}")
     return resolved
+
+
+def assert_summary_output(path: Path, project_root: Path = PROJECT_ROOT) -> Path:
+    """Allow the one published summary, while protecting all other shared files."""
+    resolved = Path(path).expanduser().resolve()
+    expected = forecast_summary_path(project_root)
+    # Resolve directory links without treating a file link to another shared
+    # workbook as permission to overwrite that source workbook.
+    expected = expected.parent.resolve() / expected.name
+    if resolved == expected:
+        return resolved
+    return assert_output_is_private(resolved, project_root)
 
 
 def project_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
