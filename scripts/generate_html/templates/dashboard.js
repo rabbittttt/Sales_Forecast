@@ -50,7 +50,13 @@
   const esc = value => displayText(value).replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
   const numberFormatter = new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 1});
   const fmt = value => typeof value === "number" ? numberFormatter.format(value) : esc(value);
-  const colors = {blue:"#1677FF",green:"#00B578",orange:"#FF8A00",purple:"#7C3AED",coral:"#FF4D6D"};
+  const colors = {blue:"#2859f5",green:"#249463",orange:"#cd681a",purple:"#7655bb",coral:"#b72d59"};
+  const forecastNavIcons = {
+    small:"M3 19h18M5 15l5-5 4 3 5-7m-4 0h4v4",
+    launch:"M3 13h4l2-7 4 13 3-9 2 3h3",
+    steady:"M4 20h16M7 16v-5m5 5V7m5 9V4",
+    raw:"M3 5h18v14H3zM3 10h18M9 5v14"
+  };
   const LABEL_SCALE_HEADROOM=1.18;
   const chartMax=values=>Math.max(...values.map(value=>Number(value||0)),1)*LABEL_SCALE_HEADROOM;
   const stackedBarWidth=step=>Math.min(42,step*.58);
@@ -389,7 +395,7 @@
         const values=dates.map(date=>forecasts.get(date)?.value??null),known=values.filter(Number.isFinite),total=known.reduce((a,b)=>a+b,0);
         const rateNote=stage==='steady'?(validRate?'外部预测锁单＝导入总大定 × '+(lockRate*100).toFixed(1)+'%（当前首销预测参数“大定到锁单率”，可人工调整；非留存大定率）。':'大定到锁单率缺失或无效，暂不能换算；已保留导入总大定。'):'导入值独立展示，不覆盖实际或系统预测。';
         node.innerHTML='<p><b>外部预测合计：'+(known.length?fmt(total):'—')+' 单（'+unit+'）</b>；'+esc(rateNote)+'</p>'+renderLifecycleLineChart({
-          series:[{label:'实际'+unit+'（当天如有则为未完日快照）',values:dates.map(date=>actualMap.get(date)??null),color:'#1677FF',role:'actual'},{label:'外部预测（'+unit+'）',values,color:'#7C3AED',role:'reference',dashed:true}],
+          series:[{label:'实际'+unit+'（当天如有则为未完日快照）',values:dates.map(date=>actualMap.get(date)??null),color:'#2859f5',role:'actual'},{label:'外部预测（'+unit+'）',values,color:'#7C3AED',role:'reference',dashed:true}],
           labels:dates,unit:'number',compact:true,title:stages[stage][0]+'实际与外部逐日预测',ariaLabel:stages[stage][0]+'外部逐日预测折线图',note:'仅展示本阶段日期。已过日期的导入预测保留；缺失留空，不补零；当日实际尚未结束。'
         })+'<details><summary>查看逐日预测</summary><div class="forecast-score-table"><table><thead><tr><th>日期</th><th>实际'+unit+'</th><th>外部预测'+unit+'</th>'+(stage==='steady'?'<th>导入总大定</th>':'')+'<th>来源文件</th></tr></thead><tbody>'+dates.map(date=>'<tr><td>'+esc(date)+(date===today?'（当日未结束）':'')+'</td><td>'+fmt(actualMap.get(date)??null)+'</td><td>'+fmt(forecasts.get(date)?.value??null)+'</td>'+(stage==='steady'?'<td>'+fmt(metricOf(forecasts.get(date)||{})==='gross'?forecasts.get(date)?.quantity??null:null)+'</td>':'')+'<td>'+esc(forecasts.get(date)?.source||'')+'</td></tr>').join('')+'</tbody></table></div></details>';
       }
@@ -713,7 +719,10 @@
       $('#moduleSelect').innerHTML=options.map(option=>`<option value="${option.id}">${option.label}</option>`).join('');
       $('#moduleSelect').value=state.module==='raw'?'raw':state.forecastStage||'launch';
       $('#moduleSelect').onchange=event=>$('#moduleNav').querySelector(`[data-forecast-nav="${event.target.value}"]`)?.click();
-      $('#moduleNav').innerHTML=options.map(option=>`<button type="button" data-forecast-nav="${option.id}" class="${(option.id==='raw'?state.module==='raw':state.module==='sales_forecast'&&state.forecastStage===option.id)?'active':''}">${option.label}</button>`).join('');
+      $('#moduleNav').innerHTML=options.map(option=>{
+        const active=option.id==='raw'?state.module==='raw':state.module==='sales_forecast'&&state.forecastStage===option.id;
+        return `<button type="button" data-forecast-nav="${option.id}" class="${active?'active':''}"${active?' aria-current="page"':''}><svg class="module-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${forecastNavIcons[option.id]}"/></svg>${option.label}</button>`;
+      }).join('');
       $('#moduleNav').onclick=async event=>{
         const button=event.target.closest('[data-forecast-nav]');if(!button)return;captureForecastDraft();const id=button.dataset.forecastNav;
         if(id==='raw'){state.module='raw';if(await ensureState()===false)return;await renderAll();syncUrl('push');}
@@ -1099,7 +1108,7 @@
   function renderRankCards(cards,kind){const directional=kind==='rise'||kind==='drop',directionalClass=directional?` rank-grid-${kind}`:'';return `<div class="rank-grid${directionalClass}">${Object.entries(cards||{}).map(([name,entry])=>{const rows=Array.isArray(entry)?entry:entry.rows||[];if(!rows.length)return `<article class="rank-card"><h3>${esc(name)} · 暂无上榜车型</h3><p class="empty">${esc(entry.empty_reason||"暂无可比排名")}</p></article>`;const maxRate=Math.max(...rows.map(row=>Math.abs(Number(row.rate)||0)),0);return `<article class="rank-card"><h3>${esc(name)} · TOP${rows.length}</h3><ol>${rows.map(row=>{const meta=[row.rate!=null?`${(Number(row.rate)*100).toFixed(1)}%`:"",row.amount!=null?`${fmt(row.amount)}元`:""].filter(Boolean).join(" · ");if(!directional)return `<li><b>${row.rank}</b><span>${esc(row.label)}${meta?`<small>${esc(meta)}</small>`:""}</span></li>`;const rate=Number(row.rate),rateLabel=row.rate!=null&&Number.isFinite(rate)?`${(rate*100).toFixed(1)}%`:'—',width=maxRate>0&&Number.isFinite(rate)?Math.min(Math.abs(rate)/maxRate*100,100):0,amount=row.amount!=null?`${fmt(row.amount)}元`:'';return `<li><b class="rank-index">${row.rank}</b><span class="rank-name">${esc(row.label)}${amount?`<small>${esc(amount)}</small>`:''}</span><div class="rank-bar" aria-hidden="true"><i style="width:${width.toFixed(1)}%"></i></div><strong class="rank-rate">${rateLabel}</strong></li>`}).join("")}</ol></article>`}).join("")}</div>`}
   function renderRights(data){return `<div class="rights"><strong>权益金额 ${fmt(data.amount)} 元</strong><p>${esc(data.text)}</p></div>`}
   function renderFeeBandStructure(data){
-    const bands=data?.bands||[],rows=data?.rows||[],palette=["#1677FF","#00C2FF","#00B578","#FFB020","#FF4D6D","#7C3AED","#ED7D31","#70AD47","#4472C4"];
+    const bands=data?.bands||[],rows=data?.rows||[],palette=["#2859f5","#00C2FF","#00B578","#FFB020","#FF4D6D","#7C3AED","#ED7D31","#70AD47","#4472C4"];
     const legend=`<div class="legend fee-legend">${bands.map((band,index)=>`<span><i style="background:${palette[index%palette.length]}"></i>${esc(band)}</span>`).join("")}</div>`;
     const body=rows.map(row=>{const total=row.values.reduce((sum,value)=>sum+Number(value||0),0),denominator=total||1;return `<div class="fee-band-row"><label title="${esc(row.label)}">${esc(row.label)}</label><div class="fee-band-chart"><div class="fee-band-track">${row.values.map((value,index)=>{const share=Number(value||0)/denominator*100;return `<i style="width:${share}%;background:${palette[index%palette.length]}" title="${esc(bands[index])} ${share.toFixed(1)}%"></i>`}).join("")}</div><div class="segment-data-labels">${row.values.map((value,index)=>{const share=Number(value||0)/denominator*100;return `<span><i style="background:${palette[index%palette.length]}"></i>${share.toFixed(1)}%</span>`}).join("")}</div></div><b>${fmt(total)}单</b></div>`}).join("");
     return `${legend}<div class="fee-band-list">${body}</div>`;
@@ -1489,7 +1498,7 @@
       const refs=selectedRefs(),chartRefs=lifecycleChartReferences(workspace.querySelector('[data-lifecycle-reference="small-progress"]'),history,refs),body=refs.map(({item},index)=>`<div><b>${index?'辅助':'主参考'} · ${esc(item.model)}</b><span>最终小订 ${fmt(item.total)}单</span><span>周期 ${item.days||0}天</span><span>D1占比 ${(Number(item.d1_share||0)*100).toFixed(1)}%</span><span>D1分时 ${(item.small_hourly_curve||[]).some(Number)?'可用':'缺失'}</span></div>`).join('');
       const days=Math.max(Number(forecast?.targetDays||target.smallDays||1),1),labels=Array.from({length:days},(_,index)=>`D${index+1}`),total=Number(forecast?.total||0),evidence=window.ForecastMath.smallDailyEvidence({rows:forecast.rows||[],startDate:target.smallStartDate,days,total,factor:index=>context.factors('small')[context.calendarType(target.smallStartDate,index).type]||1}),actualValues=evidence.cumulative.map((value,index)=>evidence.rows[index]?.actual?Math.min(value,1):null),forecastValues=Array(days).fill(null);
       if(!forecast.error&&total>0){evidence.cumulative.forEach((value,index)=>{if(evidence.rows[index]?.actual===false)forecastValues[index]=value;});const anchor=evidence.anchorIndex;if(anchor>=0&&forecastValues.some(Number.isFinite))forecastValues[anchor]=actualValues[anchor];}
-      const chartSeries=[];if(actualValues.some(Number.isFinite))chartSeries.push({label:`${target.name} · 真实累计`,values:actualValues,color:'#1677FF',role:'actual'});if(forecastValues.some(Number.isFinite))chartSeries.push({label:`${target.name} · 预测累计`,values:forecastValues,color:'#00A878',role:'forecast',dashed:true});
+      const chartSeries=[];if(actualValues.some(Number.isFinite))chartSeries.push({label:`${target.name} · 真实累计`,values:actualValues,color:'#2859f5',role:'actual'});if(forecastValues.some(Number.isFinite))chartSeries.push({label:`${target.name} · 预测累计`,values:forecastValues,color:'#00A878',role:'forecast',dashed:true});
       chartRefs.forEach(({item,label,color})=>{const field=(item.small_progress||[]).some(Number)?'small_progress':'standard_progress';chartSeries.push({label,values:rebasedForecastCompletionCurve(item,field,days),color,role:'reference'})});
       workspace.querySelector('[data-small-evidence]').innerHTML=`<div class="forecast-reference-facts">${body||'暂无有效参考车型'}</div><p>当前阶段：${esc(stage.label)}。自动推荐至少需${minimumEvidence}项有效证据；真实逐日曲线优先，缺失时回退到标准化小订进度。主辅权重不改变候选得分。</p>`;
       workspace.querySelector('[data-small-reference-chart]').innerHTML=renderLifecycleLineChart({series:chartSeries,labels,unit:'percent',title:'当前真实进度与主辅参考累计完成度',note:'蓝色实线为已结束完整日真实累计÷本次预测终局；绿色虚线为本次预测的后续累计。橙/紫线为主辅参考按当前小订窗口重定基的完成度，与预测使用同一条参考曲线。周期对齐：D1、D2及最后两天的日占比保持不变，中间部分按剩余周期比例拉伸后重新累计；仅对齐参考曲线，不改写历史真实销量。同长度不拉伸；不同长度且任一周期不足5天时不自动推荐该完成度参考。',ariaLabel:`${target.name}当前真实累计小订完成度与主辅参考累计曲线对比`,empty:'当前与所选参考均没有可绘制的小订累计曲线'});
@@ -1499,7 +1508,7 @@
         const current=evidence.daily;
         const actual=current.map((value,index)=>evidence.rows[index]?.actual?value:null),predicted=current.map((value,index)=>evidence.rows[index]?.actual===false?value:null);
         const last=evidence.anchorIndex;if(last>=0&&predicted.some(Number.isFinite))predicted[last]=actual[last];
-        if(actual.some(Number.isFinite))dailySeries.push({label:target.name+' · 真实',values:actual,color:'#1677FF',role:'actual'});
+        if(actual.some(Number.isFinite))dailySeries.push({label:target.name+' · 真实',values:actual,color:'#2859f5',role:'actual'});
         if(!forecast.error&&predicted.some(Number.isFinite))dailySeries.push({label:target.name+' · 预测',values:predicted,color:'#00A878',role:'forecast',dashed:true});
         dailyNode.innerHTML=renderLifecycleLineChart({series:dailySeries,labels,unit:'percent',title:'小订每日数量相对D1（到天基础曲线）',note:'主辅基础曲线决定未来逐日形状；先剔除历史日期系数，再按当前节假日、周末、工作日系数分配，日历影响只应用一次。',ariaLabel:'小订到天基础曲线'});
       }
@@ -1509,7 +1518,7 @@
         const slopeOf=(values,start)=>window.ForecastMath.dailySlope(values.map((value,index)=>{const day=context.calendarType(start,index).date;return day<today()&&Number.isFinite(value)?value/(context.factors('small')[context.calendarType(start,index).type]||1):null;}));
         const series=lifecycleChartReferences(workspace.querySelector('[data-lifecycle-reference="small-slope"]'),history,selectedRefs('slope')).map(({item,label,color})=>({label,color,role:'reference',values:slopeOf(item.daily_orders||[],item.small_start_date)}));
         const rows=evidence.rows,values=evidence.slope;
-        series.unshift({label:target.name+' · 真实斜率',color:'#1677FF',role:'actual',values:values.map((v,i)=>rows[i]?.actual?v:null)});
+        series.unshift({label:target.name+' · 真实斜率',color:'#2859f5',role:'actual',values:values.map((v,i)=>rows[i]?.actual?v:null)});
         if(!forecast.error)series.push({label:target.name+' · 预测斜率',color:'#00A878',role:'forecast',dashed:true,values:values.map((v,i)=>rows[i]?.actual===false?v:null)});
         const count=Math.max(days,...series.map(row=>row.values.length));
         slopeNode.innerHTML=renderLifecycleLineChart({series,slope:true,labels:Array.from({length:count},(_,i)=>'D'+(i+1)),title:'每日斜率 · 较前一天变化率（仅展示）',note:'斜率＝剔除日历影响后的当天日量÷前一天日量－1。D1、前一天为0或数据缺失时留空。进行中参考仅展示已结束真实日；此处主辅与权重仅控制对照，不参与总量或逐日分配。'});
@@ -1517,7 +1526,7 @@
       if(hourlyNode){
         const actual=findActual(target.name),bucket=(actual?.small_hourly_days||[]).find(row=>row.date===target.smallStartDate),hourlySeries=[],ongoing=stage.key==='d1',d1Row=(forecast.actualRows||[]).find(row=>row.date===target.smallStartDate),terminal=ongoing&&!forecast.error?Number(forecast.d1):today()>target.smallStartDate?d1Row?.orders:NaN;
         const sampled=(bucket?.hourly_valid===false?[]:bucket?.hours||[]).filter(row=>Number.isInteger(row.hour)&&row.hour>=0&&row.hour<24&&Number.isFinite(row.orders)&&row.orders>=0),lastHour=sampled.length?Math.max(...sampled.map(row=>row.hour)):-1,firstHour=sampled.filter(row=>row.orders>0).reduce((start,row)=>Math.min(start,row.hour),24);
-        if(sampled.length&&Number.isFinite(terminal)&&terminal>0){const byHour=new Map();sampled.forEach(row=>byHour.set(row.hour,(byHour.get(row.hour)||0)+row.orders));const values=Array(24).fill(null);let cumulative=0;for(let hour=firstHour;hour<=lastHour;hour++){cumulative+=byHour.get(hour)||0;values[hour]=cumulative/terminal;}hourlySeries.push({label:target.name+' · D1真实累计',values,color:'#1677FF',role:'actual'});}
+        if(sampled.length&&Number.isFinite(terminal)&&terminal>0){const byHour=new Map();sampled.forEach(row=>byHour.set(row.hour,(byHour.get(row.hour)||0)+row.orders));const values=Array(24).fill(null);let cumulative=0;for(let hour=firstHour;hour<=lastHour;hour++){cumulative+=byHour.get(hour)||0;values[hour]=cumulative/terminal;}hourlySeries.push({label:target.name+' · D1真实累计',values,color:'#2859f5',role:'actual'});}
         if(!forecast.hourly?.dailyFloorRaised&&forecast.hourly?.forecast?.some(Number.isFinite))hourlySeries.push({label:target.name+' · 后续小时预测',values:forecast.hourly.forecast,color:'#00A878',role:'forecast',dashed:true});
         lifecycleChartReferences(workspace.querySelector('[data-lifecycle-reference="small-hourly"]'),history,selectedRefs('hourly')).forEach(({item,label,color})=>{const start=window.ForecastMath.smallHourlyStart(item),values=Array.from({length:24},(_,hour)=>hour>=start&&Number.isFinite(item.small_hourly_curve?.[hour])?item.small_hourly_curve[hour]:null);if(values.some(Number.isFinite))hourlySeries.push({label:label+' · D1',values,color,role:'reference'});});
         const first=Math.min(...hourlySeries.map(row=>row.values.findIndex(Number.isFinite)).filter(hour=>hour>=0),23),hours=Array.from({length:24-first},(_,index)=>`${first+index}时`);
@@ -1638,12 +1647,12 @@
       const selected=refs(),chartRefs=lifecycleChartReferences(workspace.querySelector('[data-lifecycle-reference="steady-weekly"]'),history,selected);
       const normalize=values=>{const first=values.find(v=>Number.isFinite(v)&&v>0);return first?values.map(v=>Number.isFinite(v)?v/first:null):values.map(()=>null);};
       const currentFeature=directFeature(targetSteady(target),target),series=[];
-      series.push({label:target.name+' · 首销直接大定实际',values:normalize(currentFeature.direct_curve),color:'#1677FF',role:'actual'});
+      series.push({label:target.name+' · 首销直接大定实际',values:normalize(currentFeature.direct_curve),color:'#2859f5',role:'actual'});
       chartRefs.forEach(({item,label,color})=>series.push({label,values:normalize(directFeature(item).direct_curve),color,role:'reference'}));
       const count=Math.max(...series.map(row=>row.values.length),1);
       workspace.querySelector('[data-steady-reference-chart]').innerHTML=renderLifecycleLineChart({series,labels:Array.from({length:count},(_,i)=>'D'+(i+1)),title:'全首销直接大定曲线规律',note:'各车型先剔除日历影响，再以首个正数日归一；实际历史不改写。评分按周期适配后比较形状，不比较绝对销量。'});
       const ageSeries=chartRefs.map(({item,label,color})=>({label,color,role:'reference',weeks:directFeature(item).release_weeks}));
-      ageSeries.unshift({label:target.name+' · 平销实际',color:'#1677FF',role:'actual',weeks:currentFeature.release_weeks});
+      ageSeries.unshift({label:target.name+' · 平销实际',color:'#2859f5',role:'actual',weeks:currentFeature.release_weeks});
       const ages=[...new Set(ageSeries.flatMap(row=>row.weeks.map(week=>week.week)))].sort((a,b)=>a-b);
       const firstAge=ages[0]||1,lastAge=ages.at(-1)||firstAge,ageAxis=Array.from({length:lastAge-firstAge+1},(_,i)=>firstAge+i);
       const commonAnchor=ages.find(age=>ageSeries.filter(row=>row.weeks.length).every(row=>row.weeks.some(week=>week.week===age&&week.level>0)));
@@ -1750,7 +1759,7 @@
 
 
   function renderForecastReferenceChartV2(root,data,history,scopeCard=null){
-    const referencePalette=['#FF8A00','#7C3AED','#D9485F','#00A6A6','#B7791F','#6B7280','#DB2777','#65A30D','#C2410C','#475569','#9333EA','#0F766E'],referenceColor=index=>referencePalette[index%referencePalette.length],actualColor='#1677FF',forecastColor='#00A878',comparison=root._forecastComparison||null;
+    const referencePalette=['#FF8A00','#7C3AED','#D9485F','#00A6A6','#B7791F','#6B7280','#DB2777','#65A30D','#C2410C','#475569','#9333EA','#0F766E'],referenceColor=index=>referencePalette[index%referencePalette.length],actualColor='#2859f5',forecastColor='#00A878',comparison=root._forecastComparison||null;
     const taskSpecs={
       hourly:{metric:'hourly_curve',title:comparison?.hourly?.date?`D${comparison.hourly.day} · ${comparison.hourly.date} 分时累计进度`:'D1 分时累计参考',unit:'rate',hourly:true},
       small_progress:{metric:'daily_small',title:'小转大真实斜率与预测完成度',unit:'rate',observableShape:true,component:'small_to_big'},
