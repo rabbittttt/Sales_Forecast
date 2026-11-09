@@ -1,10 +1,9 @@
-"""Independent forecast entry point and immutable lazy source snapshots."""
+"""Independent forecast entry point and legacy source asset helpers."""
 from __future__ import annotations
 
 import base64
 import copy
 import gzip
-import hashlib
 import json
 import re
 from contextlib import ExitStack
@@ -62,38 +61,32 @@ class StandaloneForecastTests(TestCase):
         self.assertEqual(forecast["app_mode"], "forecast")
         self.assertIs(forecast["dashboards"]["group|sales_forecast"], original["dashboards"]["group|sales_forecast"])
         self.assertEqual(list(forecast["dashboards"]), ["group|sales_forecast"])
-        self.assertEqual(forecast["subjects"][0]["modules"], ["sales_forecast", "raw"])
-        self.assertEqual(forecast["subjects"][1]["modules"], ["raw"])
-        self.assertEqual(forecast["config"]["module_order"], ["sales_forecast", "raw"])
+        self.assertEqual(forecast["subjects"][0]["modules"], ["sales_forecast"])
+        self.assertEqual(forecast["subjects"][1]["modules"], [])
+        self.assertEqual(forecast["config"]["module_order"], ["sales_forecast"])
         for key in ("order_page", "forecast_legacy_page", "forecast_page"):
             self.assertNotIn(key, forecast)
         self.assertEqual(forecast["meta"]["generated_at"], original["meta"]["generated_at"])
         self.assertEqual(forecast["chart_assets"], {})
         self.assertEqual(forecast["raw_blocks"], {})
-        self.assertEqual(forecast["raw_files"], original["raw_files"])
+        self.assertEqual(forecast["raw_files"], [])
 
-    def test_emitted_payloads_are_isolated_and_raw_urls_restore_exact_blocks(self):
+    def test_emitted_payloads_preserve_prediction_without_raw_assets(self):
         original = self.fixture()
         with TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / FORECAST_PAGE_NAME
             forecast = forecast_manifest(original)
-            forecast["raw_block_urls"] = write_raw_block_assets(original["raw_blocks"], output)
             render_dashboard(forecast, generator.ROOT / "templates", output)
             meta, boards, raw = embedded(output)
             self.assertEqual(set(boards), {"group|sales_forecast"})
             self.assertEqual(raw, {})
-            self.assertEqual(meta["raw_files"], original["raw_files"])
+            self.assertEqual(meta["raw_files"], [])
+            self.assertEqual(meta["raw_block_urls"], {})
+            self.assertFalse((root / "forecast_assets").exists())
             self.assertFalse((root / "分析.html").exists())
             for key in ("order_page", "forecast_legacy_page", "forecast_page"):
                 self.assertNotIn(key, meta)
-            for key, url in meta["raw_block_urls"].items():
-                content = (root / url).read_bytes()
-                digest = hashlib.sha256(content).hexdigest()
-                self.assertEqual(Path(url).name, f"raw-{digest}.js")
-                assignment = re.search(r'window.DASHBOARD_RAW_B64\[(".*?")\]=(".*?");', content.decode())
-                self.assertEqual(json.loads(assignment[1]), key)
-                self.assertEqual(json.loads(assignment[2]), original["raw_blocks"][key])
 
     def test_resources_are_immutable_and_new_build_does_not_invalidate_old_page(self):
         with TemporaryDirectory() as directory:
@@ -150,7 +143,7 @@ class StandaloneForecastTests(TestCase):
                 stack.enter_context(patch.object(generator, "discover_subjects", return_value=subjects))
                 stack.enter_context(patch.object(generator, "forecast_target_names", return_value=[]))
                 stack.enter_context(patch.object(generator, "MODULES", modules))
-                stack.enter_context(patch.object(generator, "raw_tables", return_value=(self.fixture()["raw_files"], self.fixture()["raw_blocks"])))
+                stack.enter_context(patch.object(generator, "raw_tables", side_effect=AssertionError("forecast must not pack raw workbooks")))
                 stack.enter_context(patch.object(generator, "add_kpi_comparisons"))
                 stack.enter_context(patch.object(generator, "validate_manifest", return_value=[]))
                 shared_summary = root / "shared" / generator.SUMMARY_NAME
@@ -168,7 +161,7 @@ class StandaloneForecastTests(TestCase):
                 self.assertEqual(bool(forecast_boards), not disabled)
                 self.assertEqual(forecast_raw, {})
                 self.assertEqual(forecast_meta["forecast_disabled"], disabled)
-                self.assertEqual((root / "forecast_assets").exists(), not disabled)
+                self.assertFalse((root / "forecast_assets").exists())
                 self.assertEqual("group|sales_forecast" in manifest["dashboards"], not disabled)
                 self.assertEqual(list(root.glob("*.html")), [output])
                 self.assertNotIn("order_page", forecast_meta)

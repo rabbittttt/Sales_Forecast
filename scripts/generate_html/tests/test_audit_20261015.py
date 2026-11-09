@@ -103,11 +103,11 @@ const doc={querySelectorAll:()=>[],body:{appendChild(){}},createElement:()=>({cl
 class FakeBlob{constructor(parts){this.parts=parts}}
 const urls={createObjectURL:blob=>{const key='url'+blobs.size;blobs.set(key,blob);return key},revokeObjectURL(){}};
 const api=new Function('$','document','state','DATA','RAW_BLOCKS','decompressJson','esc','renderRawTable',
- 'applyRawFrozenColumns','syncUrl','Blob','URL','showToast','setTimeout',
+ 'applyRawFrozenColumns','syncUrl','Blob','URL','showToast','setTimeout','FORECAST_APP',
  source.slice(begin,end)+filter+'\n'+source.slice(exportBegin,exportEnd)+
  ';return {renderRaw,cache:()=>({rows:rawRowsCache,key:rawRowsKey})};')($,doc,state,DATA,
  {'0|0':'old','1|0':'new'},name=>new Promise(resolve=>pending[name]=resolve),String,JSON.stringify,
- ()=>{},()=>{},FakeBlob,urls,()=>{},()=>{});
+ ()=>{},()=>{},FakeBlob,urls,()=>{},()=>{},false);
 (async()=>{
  const old=api.renderRaw();state.rawFile=1;const current=api.renderRaw();
  if(REVERSE){pending.old({rows:[['标题'],['OLD']]});await old;pending.new({rows:[['标题'],['NEW']]});await current;}

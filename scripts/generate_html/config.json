@@ -5,12 +5,10 @@
   "forecast_as_of_date": "",
   "build_manifest_mode": "off",
   "module_order": [
-    "sales_forecast",
-    "raw"
+    "sales_forecast"
   ],
   "module_labels": {
-    "sales_forecast": "销量预测",
-    "raw": "底表中心"
+    "sales_forecast": "销量预测"
   },
   "grain_labels": {
     "day": "日",

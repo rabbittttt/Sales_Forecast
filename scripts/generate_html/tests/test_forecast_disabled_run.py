@@ -56,7 +56,7 @@ class ForecastDisabledRunTests(unittest.TestCase):
                 for subject in manifest["subjects"]:
                     self.assertEqual("sales_forecast" in subject["modules"], not disabled)
                     self.assertNotIn("overview", subject["modules"])
-                    self.assertIn("raw", subject["modules"])
+                    self.assertNotIn("raw", subject["modules"])
                     self.assertNotIn(subject["id"] + "|overview", manifest["dashboards"])
                     self.assertEqual(subject["id"] + "|sales_forecast" in manifest["dashboards"], not disabled)
 

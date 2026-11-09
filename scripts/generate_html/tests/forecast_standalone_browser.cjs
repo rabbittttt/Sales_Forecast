@@ -35,10 +35,14 @@ async function run(){
     for(const stage of ['small','steady','launch']){
       await page.locator('[data-forecast-nav="'+stage+'"]').click();
       await page.waitForSelector('[data-forecast-stage-pane="'+stage+'"].active');
-      for(const view of ['params','evidence','score','result']){
+      const views=stage==='launch'?['params','evidence','score','result']:['evidence','score','result'];
+      check(stage+'参数配置仅在有首销方法参数时显示',await page.locator('[data-forecast-tab="params"]').isVisible()===(stage==='launch'));
+      for(const view of views){
         await page.locator('[data-forecast-tab="'+view+'"]').click();
         const selector=stage==='launch'?'[data-forecast-pane="'+view+'"].active':'[data-lifecycle-subpane="'+stage+'-'+view+'"].active';
-        check(stage+' / '+view+'可见',await page.locator(selector).isVisible());
+        const pane=page.locator(selector);
+        check(stage+' / '+view+'可见',await pane.isVisible());
+        if(view==='evidence')check(stage+'公共参数位于预测依据',await pane.locator('.forecast-common-controls [data-bridge-stage="'+stage+'"]').isVisible());
       }
     }
     const launchDays=page.locator('.forecast-target [data-forecast-target="days"]');
@@ -75,54 +79,27 @@ async function run(){
     await page.evaluate(()=>localStorage.setItem('harmony-forecast-v1:'+location.pathname,JSON.stringify({version:1,drafts:[],imports:[],scopes:[]})));
     await page.reload();await ready(page);
     check('旧项目草稿变化不影响独立参数与导入',await conversion.inputValue()==='41.2'&&await page.evaluate(raw=>localStorage.getItem('sales-forecast-independent-v1:'+location.pathname)===raw,independentDraft));
-    // Source buttons must retain physical-file/Sheet positioning after the split.
-    await page.locator('[data-workspace-source]').click();await page.waitForSelector('#rawTable');await settled(page);
-    check('来源跳转只加载所选Sheet',await page.evaluate(()=>Object.keys(window.DASHBOARD_RAW_B64).length===1&&Object.keys(window.DASHBOARD_RAW_B64).every(key=>!key.endsWith('|xlsx'))));
-    const selected=await page.evaluate(()=>({file:document.querySelector('#rawFile').value,sheet:document.querySelector('#rawSheet').value,key:window.DASHBOARD_DATA.raw_files[Number(document.querySelector('#rawFile').value)].workbook_key}));
-    check('底表默认锁定首列且来源定位写入网址',await page.locator('#rawFreezeFirstColumn').isChecked()&&new URL(page.url()).searchParams.get('rawSheet')===await page.locator('#rawSheet').evaluate(n=>n.selectedOptions[0].textContent));
-    const firstText=await page.locator('#rawTable tr').nth(1).locator('td').first().textContent();
-    await page.locator('#rawSearch').fill(firstText||'2026');
-    const csvDownload=page.waitForEvent('download');await page.locator('#exportRaw').click();const csv=await csvDownload;
-    check('当前筛选数据可导出CSV',csv.suggestedFilename().endsWith('.csv')&&fs.statSync(await csv.path()).size>3);
-    const xlsxDownload=page.waitForEvent('download');await page.locator('#exportRawWorkbook').click();const xlsx=await xlsxDownload;
-    const workbook=fs.readFileSync(await xlsx.path());
-    const expectedHash=await page.evaluate(key=>{
-      const text=window.DASHBOARD_RAW_B64[key];return text;
-    },selected.key);
-    check('整个Excel按需下载且字节与快照一致',xlsx.suggestedFilename().endsWith('.xlsx')&&workbook.equals(Buffer.from(expectedHash,'base64'))&&workbook[0]===0x50&&workbook[1]===0x4b);
-    // Return through browser history, keeping model/phase and its saved draft.
-    await page.goBack();await ready(page);
-    check('来源页后退恢复预测车型和人工参数',await page.locator('#subjectSelect').evaluate(n=>n.selectedOptions[0].textContent)===target&&await conversion.inputValue()==='41.2');
-    // A fresh document has no cached row blocks; block only its requested asset once.
-    let failOnce=true;await page.route('**/forecast_assets/*.js',route=>{if(failOnce){failOnce=false;route.abort();}else route.continue();});
-    await page.reload();await ready(page);await page.locator('[data-workspace-source]').click();
-    await page.waitForSelector('[data-raw-retry]');check('缺少配套底表时明确失败并允许重试',await page.locator('[data-raw-retry]').isVisible());
-    await page.locator('[data-raw-retry]').click();await page.waitForSelector('#rawTable');await settled(page);
-    check('底表重试后恢复且未缓存失败Promise',await page.locator('#rawTable tr').count()>1);
-    await page.unroute('**/forecast_assets/*.js');
-    let corruptOnce=true;await page.route('**/forecast_assets/*.js',route=>{
-      if(corruptOnce){corruptOnce=false;route.fulfill({contentType:'application/javascript',body:'window.DASHBOARD_RAW_B64['+JSON.stringify(selected.file+'|'+selected.sheet)+']="bm90LWd6aXA=";'});}
-      else route.continue();
-    });
-    await page.goto(url(forecastName,forecastParams));await ready(page);await page.locator('[data-workspace-source]').click();
-    await page.waitForSelector('[data-raw-retry]');check('底表损坏时不误报为空表',await page.locator('[data-raw-retry]').isVisible());
-    await page.locator('[data-raw-retry]').click();await page.waitForSelector('#rawTable');await settled(page);
-    check('解压失败后重试可重新读取正确资源',await page.locator('#rawTable tr').count()>1);
-    await page.unroute('**/forecast_assets/*.js');
-    await page.goto(url(forecastName,forecastParams));await ready(page);
-    check('直接打开独立看板保留车型',await page.locator('#subjectSelect').evaluate(n=>n.selectedOptions[0].textContent)===target);
+    await page.locator('[data-forecast-tab="evidence"]').click();
+    await page.locator('[data-bridge-stage="launch"] [data-bridge-control="workday"]').fill('1.07');
+    await page.locator('[data-workspace-source]').click();
+    await page.waitForFunction(()=>document.querySelector('.forecast-workspace').getAttribute('aria-busy')==='false');
+    check('改公共参数后可直接查看来源位置',await page.locator('.forecast-source-details[open] [data-forecast-source-location]:not([hidden])').isVisible()&&await page.locator('[data-forecast-day-source]').textContent());
+    check('独立页不发布底表数据',await page.evaluate(()=>window.DASHBOARD_DATA.raw_files.length===0&&Object.keys(window.DASHBOARD_DATA.raw_block_urls).length===0&&Object.keys(window.DASHBOARD_RAW_B64).length===0));
+    await page.goto(url(forecastName,{...forecastParams,module:'raw',rawFile:'旧底表.xlsx',rawSheet:'旧表'}));await ready(page);
+    check('旧底表链接转回预测并保留车型和草稿',new URL(page.url()).searchParams.get('module')==='sales_forecast'&&await page.locator('#subjectSelect').evaluate(n=>n.selectedOptions[0].textContent)===target&&await conversion.inputValue()==='41.2');
+    check('未请求底表资源',!requests.some(value=>value.includes('/forecast_assets/')));
     for(const width of [1366,1920,390]){
       await page.setViewportSize({width,height:1000});
       check(width+'px预测导航无返回订单分析入口',await page.locator('.forecast-order-link').count()===0&&await page.getByRole('link',{name:'返回订单分析'}).count()===0);
-      check(width+'px预测导航仅含三阶段和底表',JSON.stringify(await page.locator('[data-forecast-nav]').evaluateAll(nodes=>nodes.map(node=>node.dataset.forecastNav)))===JSON.stringify(['small','launch','steady','raw'])&&JSON.stringify(await page.locator('#moduleSelect option').evaluateAll(nodes=>nodes.map(node=>node.value)))===JSON.stringify(['small','launch','steady','raw']));
+      check(width+'px预测导航仅含三阶段',JSON.stringify(await page.locator('[data-forecast-nav]').evaluateAll(nodes=>nodes.map(node=>node.dataset.forecastNav)))===JSON.stringify(['small','launch','steady'])&&JSON.stringify(await page.locator('#moduleSelect option').evaluateAll(nodes=>nodes.map(node=>node.value)))===JSON.stringify(['small','launch','steady']));
       const layout=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,fields:[...document.querySelectorAll('.forecast-target>.forecast-target-settings [data-forecast-target]')].map(n=>{const b=n.getBoundingClientRect();return {left:b.left,right:b.right,width:b.width,height:b.height};})}));
       report.layout.push(layout);check(width+'px页头9个参数可见且无横向裁切',layout.scroll<=width+1&&layout.fields.length===9&&layout.fields.every(b=>b.left>=0&&b.right<=width+1&&b.width>0&&b.height>0));
       check(width+'px结果区域无整页横向溢出',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
     }
     const filePage=await context.newPage();filePage.on('pageerror',e=>report.errors.push(e.message));
     const fileUrl=pathToFileURL(path.join(output,forecastName));fileUrl.search=new URLSearchParams(forecastParams);
-    await filePage.goto(fileUrl.href);await ready(filePage);await filePage.locator('[data-workspace-source]').click();await filePage.waitForSelector('#rawTable');
-    check('file协议独立入口与配套底表也可打开',await filePage.locator('#rawTable tr').count()>1);
+    await filePage.goto(fileUrl.href);await ready(filePage);
+    check('单文件预测入口可打开',await filePage.locator('.forecast-workspace').isVisible());
     assert.deepEqual(report.errors,[]);check('浏览器无脚本异常',true);
     console.log(JSON.stringify({passed:true,checks:report.checks.length,layout:report.layout,pageErrors:report.errors},null,2));
     await context.close();

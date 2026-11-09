@@ -445,7 +445,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         config = load_config(ROOT / "config.json")
         self.assertIn(config["chart_render_mode"], {"original", "generated"})
         self.assertEqual(config["chart_render_mode"], "generated")
-        self.assertEqual(config["module_order"], ["sales_forecast", "raw"])
+        self.assertEqual(config["module_order"], ["sales_forecast"])
 
     def test_generated_chart_renderers_include_visible_data_labels(self):
         script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
@@ -576,6 +576,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         loader = script[script.index('  const boardCache={}'):script.index('  function subject()')]
         navigation = script[script.index('  async function ensureState()'):script.index('  function renderSubjectSelect()')]
         setup = """
+        const FORECAST_APP=false;
         const group={id:'group',type:'group',modules:['sales_forecast','overview','raw']},
             brand={id:'brand',type:'brand',modules:['sales_forecast','raw']},
             generation={id:'new-car',type:'generation',modules:['raw']};

@@ -25,13 +25,15 @@ def forecast_manifest(manifest: dict[str, Any], *, forecast_disabled: bool = Fal
         "forecast_disabled": forecast_disabled,
         "meta": {**manifest.get("meta", {}), "title": "鸿蒙智行销量预测"},
         "config": {**manifest.get("config", {}), "title": "鸿蒙智行销量预测",
-                   "module_order": ["sales_forecast", "raw"]},
+                   "module_order": ["sales_forecast"],
+                   "module_labels": {key: label for key, label in manifest.get("config", {}).get("module_labels", {}).items()
+                                     if key == "sales_forecast"}},
         "subjects": [{**subject, "modules": [module for module in subject.get("modules", [])
-                                               if module in {"sales_forecast", "raw"}]}
+                                               if module == "sales_forecast"]}
                      for subject in manifest.get("subjects", [])],
         "dashboards": boards,
         "chart_assets": {},
-        "raw_files": manifest.get("raw_files", []) if boards else [],
+        "raw_files": [],
         "raw_blocks": {},
         "raw_block_urls": {},
     }

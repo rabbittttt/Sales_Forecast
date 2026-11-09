@@ -31,6 +31,7 @@
   const RAW_BLOCKS = window.DASHBOARD_RAW_B64 = window.DASHBOARD_RAW_B64 || {};
   const rawBlockRequests=new Map();
   async function getRawBlock(key){
+    if(FORECAST_APP)return '';
     if(RAW_BLOCKS[key])return RAW_BLOCKS[key];
     const source=DATA.raw_block_urls?.[key];
     if(!source)return '';
@@ -54,8 +55,7 @@
   const forecastNavIcons = {
     small:"M3 19h18M5 15l5-5 4 3 5-7m-4 0h4v4",
     launch:"M3 13h4l2-7 4 13 3-9 2 3h3",
-    steady:"M4 20h16M7 16v-5m5 5V7m5 9V4",
-    raw:"M3 5h18v14H3zM3 10h18M9 5v14"
+    steady:"M4 20h16M7 16v-5m5 5V7m5 9V4"
   };
   const LABEL_SCALE_HEADROOM=1.18;
   const chartMax=values=>Math.max(...values.map(value=>Number(value||0)),1)*LABEL_SCALE_HEADROOM;
@@ -446,7 +446,7 @@
   const sameForecastModel=(leftValue,rightValue,aliases=forecastModelAliases())=>{const left=forecastModelKey(leftValue,aliases),right=forecastModelKey(rightValue,aliases);return !!left&&!!right&&left===right};
   const moduleAvailable=(item,moduleId)=>moduleId==="sales_forecast"
     ?item?.type==="generation"&&(item.modules.includes(moduleId)||DATA.subjects.some(candidate=>candidate.modules.includes("sales_forecast")))
-    :DATA.app_mode==='forecast'&&moduleId==='raw'?!!DATA.raw_files?.length:!!item?.modules.includes(moduleId);
+    :!FORECAST_APP&&!!item?.modules.includes(moduleId);
   function forecastPageUrl(){
     const url=new URL(DATA.forecast_page,location.href);url.searchParams.set('subject',state.subject||'');url.searchParams.set('module','sales_forecast');
     if(!state.forecastStageAuto&&state.forecastStage)url.searchParams.set('forecastStage',state.forecastStage);
@@ -499,6 +499,7 @@
     state.forecastStage=forecastStageFromTarget(data?.target);
   }
   function syncUrl(mode="replace"){
+    if(FORECAST_APP)state.module="sales_forecast";
     try{
       const url=new URL(location.href),params=url.searchParams;
       params.set("subject",state.subject||"");params.set("module",state.module);
@@ -520,7 +521,7 @@
     try{history.replaceState({...history.state,reading:{page:page?.scrollTop||0,tableTop:table?.scrollTop||0,tableLeft:table?.scrollLeft||0}},'',location.href)}catch{}
   }
   function readRawLocation(params){
-    if(!params.has('rawFile'))return;
+    if(FORECAST_APP||!params.has('rawFile'))return;
     const file=DATA.raw_files.findIndex(item=>item.name===params.get('rawFile'));
     state.rawFile=Math.max(file,0);
     state.rawSheet=Math.max(DATA.raw_files[state.rawFile]?.sheets.findIndex(item=>item.name===params.get('rawSheet'))??0,0);
@@ -530,15 +531,15 @@
     captureForecastDraft();
     const reading=history.state?.reading;restoringReadingPosition=true;
     const params=new URLSearchParams(location.search),requested=params.get("subject"),requestedSubject=DATA.subjects.find(item=>item.id===requested||item.name===requested);
-    if(requestedSubject)state.subject=requestedSubject.id;
-    state.module=params.get("module")||state.module;
+    if(requestedSubject&&(!FORECAST_APP||requestedSubject.type==='generation'))state.subject=requestedSubject.id;
+    state.module=FORECAST_APP?"sales_forecast":params.get("module")||state.module;
     state.grain=params.get("grain")||state.grain;state.period=params.get("period")||null;
     if(state.module==="launch_rhythm"&&!params.get("grain"))state.grain="day";
     const requestedStage=params.get("forecastStage");state.forecastStageAuto=!forecastStages.some(item=>item.id===requestedStage);if(!state.forecastStageAuto)state.forecastStage=requestedStage;
     state.forecastCampaign=params.get("forecastCampaign")||null;
     const requestedView=params.get("forecastView");state.forecastView=forecastViews.includes(requestedView)?requestedView:"result";
     readRawLocation(params);
-    try{if(await ensureState()===false)return;await renderAll();if(reading){$('#page').scrollTop=reading.page||0;const table=$('#rawTable');if(table){table.scrollTop=reading.tableTop||0;table.scrollLeft=reading.tableLeft||0;}}}
+    try{if(await ensureState()===false)return;await renderAll();if(FORECAST_APP)syncUrl('replace');if(reading&&(!FORECAST_APP||params.get('module')==='sales_forecast')){$('#page').scrollTop=reading.page||0;const table=$('#rawTable');if(table){table.scrollTop=reading.tableTop||0;table.scrollLeft=reading.tableLeft||0;}}}
     finally{restoringReadingPosition=false;}
   }
 
@@ -546,8 +547,7 @@
     const params=new URLSearchParams(location.search),requested=params.get("subject");
     const requestedSubject=DATA.subjects.find(item=>item.id===requested||item.name===requested);
     state.subject=((FORECAST_APP?requestedSubject?.type==='generation'&&requestedSubject:requestedSubject)||DATA.subjects.find(item=>FORECAST_APP?item.type==='generation'&&moduleAvailable(item,'sales_forecast'):item.modules.includes("overview"))||(FORECAST_APP&&DATA.subjects.find(item=>item.type==='generation'))||DATA.subjects[0]).id;
-    state.module=params.get("module")||(FORECAST_APP?'sales_forecast':state.module);
-    if(FORECAST_APP&&!['raw','sales_forecast'].includes(state.module))state.module='sales_forecast';
+    state.module=FORECAST_APP?'sales_forecast':params.get("module")||state.module;
     state.grain=params.get("grain")||state.grain;state.period=params.get("period")||state.period;
     readRawLocation(params);
     if(state.module==="launch_rhythm"&&!params.get("grain"))state.grain="day";
@@ -599,9 +599,10 @@
   }
   async function ensureState(){
     const revision=ensureState.revision=(ensureState.revision||0)+1;
+    if(FORECAST_APP)state.module="sales_forecast";
     let item=subject();
     if(DATA.app_mode==='forecast'&&(DATA.forecast_disabled||!Object.keys(DATA.dashboard_blocks||{}).some(key=>key.endsWith('|sales_forecast')))){state.module='sales_forecast';return true;}
-    if(!moduleAvailable(item,state.module))state.module=item.modules.find(id=>id!=="raw"&&moduleAvailable(item,id))||"raw";
+    if(!FORECAST_APP&&!moduleAvailable(item,state.module))state.module=item.modules.find(id=>id!=="raw"&&moduleAvailable(item,id))||"raw";
     if(state.module==="raw")return true;
     const subjectId=state.subject,moduleId=state.module;
     const board=await getDashboard();
@@ -661,6 +662,7 @@
     const suffix=id.charAt(0).toUpperCase()+id.slice(1),label=forecastStages.find(item=>item.id===id)?.label||"销量预测",badge=root.querySelector('[data-forecast-current-day]'),source=root.querySelector('[data-forecast-day-source]');
     if(badge)badge.textContent=root.dataset[`forecastStatus${suffix}`]||`${label}状态判定中`;
     if(source)source.textContent=root.dataset[`forecastSource${suffix}`]||`正在检查${label}的时间阶段与数据来源`;
+    const sourceLocation=root.querySelector('[data-forecast-source-location]');if(sourceLocation&&sourceLocation.dataset.forecastSourceStage!==id)sourceLocation.hidden=true;
     refreshForecastHeaderBrief(root);
   }
   function setForecastStageSummary(root,id,status,source){
@@ -672,10 +674,11 @@
   }
   function applyForecastView(root,id){
     if(!root||!forecastViews.includes(id))return;
+    const stage=forecastStages.some(item=>item.id===state.forecastStage)?state.forecastStage:"launch",prefix=stage==="launch"?"forecast":`${stage}-forecast`,hasParameters=!!root.querySelector(`#${prefix}-pane-params`);
+    if(FORECAST_APP&&id==='params'&&!hasParameters)id='evidence';
     state.forecastView=id;
     if(FORECAST_APP)document.body.dataset.forecastView=id;
-    const stage=forecastStages.some(item=>item.id===state.forecastStage)?state.forecastStage:"launch",prefix=stage==="launch"?"forecast":`${stage}-forecast`;
-    root.querySelectorAll('[data-forecast-tab]').forEach(button=>{const active=button.dataset.forecastTab===id;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active));button.setAttribute('aria-controls',`${prefix}-pane-${button.dataset.forecastTab}`);button.tabIndex=active?0:-1});
+    root.querySelectorAll('[data-forecast-tab]').forEach(button=>{button.hidden=FORECAST_APP&&button.dataset.forecastTab==='params'&&!hasParameters;const active=!button.hidden&&button.dataset.forecastTab===id;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active));button.setAttribute('aria-controls',`${prefix}-pane-${button.dataset.forecastTab}`);button.tabIndex=active?0:-1});
     root.querySelectorAll('[data-forecast-pane]').forEach(pane=>pane.classList.toggle('active',pane.dataset.forecastPane===id));
     root.querySelectorAll('[data-lifecycle-subpane]').forEach(pane=>pane.classList.toggle('active',pane.dataset.lifecycleSubpane===`${stage}-${id}`));
     if(stage==='launch'&&id==='score')root._renderLaunchScoreDashboard?.();
@@ -686,12 +689,13 @@
     const evidenceTab=root.querySelector('[data-forecast-tab="evidence"]');
     evidenceTab.insertAdjacentHTML('beforebegin','<button id="forecast-tab-params" role="tab" aria-selected="false" tabindex="-1" data-forecast-tab="params">参数配置</button>');
     for(const stage of forecastStages){
-      const scope=root.querySelector(`[data-forecast-stage-pane="${stage.id}"]`),controls=scope?.querySelector('.forecast-evidence-controls');if(!controls)continue;
+      const scope=root.querySelector(`[data-forecast-stage-pane="${stage.id}"]`),controls=scope?.querySelector('.forecast-evidence-controls'),parameters=controls?.querySelector('.forecast-parameter-rail');if(!parameters)continue;
       const pane=document.createElement('section'),launch=stage.id==='launch';
       pane.id=`${launch?'forecast':stage.id+'-forecast'}-pane-params`;pane.setAttribute('aria-labelledby','forecast-tab-params');pane.setAttribute('role','tabpanel');
       pane.className=`forecast-parameters-pane ${launch?'forecast-pane':'forecast-lifecycle-subpane'}${state.forecastView==='params'?' active':''}`;
       pane.setAttribute(launch?'data-forecast-pane':'data-lifecycle-subpane',launch?'params':`${stage.id}-params`);
-      controls.parentElement.before(pane);pane.append(controls);
+      const parameterControls=controls.cloneNode(false);parameterControls.append(parameters);
+      controls.parentElement.before(pane);pane.append(parameterControls);
     }
     const scale=root.querySelector('.forecast-scale-check');
     if(scale){const details=document.createElement('details');details.className='forecast-scale-details';const summary=document.createElement('summary');summary.textContent='总体量级合理性校验';details.append(summary);scale.before(details);details.append(scale);}
@@ -712,18 +716,17 @@
   function renderNav(){
     const item=subject();
     if(FORECAST_APP){
-      const options=[...forecastStages.map(stage=>({id:stage.id,label:stage.label})),{id:'raw',label:'底表中心'}];
+      const options=forecastStages.map(stage=>({id:stage.id,label:stage.label}));
       $('#moduleSelect').innerHTML=options.map(option=>`<option value="${option.id}">${option.label}</option>`).join('');
-      $('#moduleSelect').value=state.module==='raw'?'raw':state.forecastStage||'launch';
+      $('#moduleSelect').value=state.forecastStage||'launch';
       $('#moduleSelect').onchange=event=>$('#moduleNav').querySelector(`[data-forecast-nav="${event.target.value}"]`)?.click();
       $('#moduleNav').innerHTML=options.map(option=>{
-        const active=option.id==='raw'?state.module==='raw':state.module==='sales_forecast'&&state.forecastStage===option.id;
+        const active=state.forecastStage===option.id;
         return `<button type="button" data-forecast-nav="${option.id}" class="${active?'active':''}"${active?' aria-current="page"':''}><svg class="module-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${forecastNavIcons[option.id]}"/></svg>${option.label}</button>`;
       }).join('');
       $('#moduleNav').onclick=async event=>{
-        const button=event.target.closest('[data-forecast-nav]');if(!button)return;captureForecastDraft();const id=button.dataset.forecastNav;
-        if(id==='raw'){state.module='raw';if(await ensureState()===false)return;await renderAll();syncUrl('push');}
-        else if(state.module!=='sales_forecast'){state.module='sales_forecast';state.forecastStage=id;state.forecastStageAuto=false;if(await ensureState()===false)return;await renderAll();syncUrl('push');}
+        const button=event.target.closest('[data-forecast-nav]'),id=button?.dataset.forecastNav;if(!forecastStages.some(stage=>stage.id===id))return;captureForecastDraft();
+        if(state.module!=='sales_forecast'){state.module='sales_forecast';state.forecastStage=id;state.forecastStageAuto=false;if(await ensureState()===false)return;await renderAll();syncUrl('push');}
         else await activateForecastStage(id);
       };return;
     }
@@ -2087,7 +2090,7 @@
       if(actual){target.selectedSource=actual.selected_source||'missing';target.selectedSourceLabel=actual.selected_source_label||'数据缺失';target.fieldSources=actual.field_sources||{};target.missingFields=actual.missing_fields||[];target.dataMissing=!!actual.data_missing;target.sourceLatestDate=actual.source_latest_date||''}
       const sourceButton=document.querySelector('[data-workspace-source]');if(sourceButton)sourceButton.onclick=()=>{
         let source=actual?.day_source||data.history_source;
-        if(FORECAST_APP&&state.forecastStage==='small')source=Object.entries(actual?.small_daily_sources||{}).sort(([a],[b])=>b.localeCompare(a)).map(([,value])=>value).find(value=>value?.file&&value?.sheet)||data.small_order_source||source;
+        if(FORECAST_APP&&state.forecastStage==='small')source=Object.entries(actual?.small_daily_sources||{}).sort(([a],[b])=>b.localeCompare(a)).map(([,value])=>value).find(value=>typeof value==='string'?value.trim():value?.file&&value?.sheet)||data.small_order_source||source;
         if(FORECAST_APP&&state.forecastStage==='steady'){const steady=(data.steady_history||[]).find(item=>sameModel(item.generation||item.model,target.primaryGeneration||target.name));if(steady?.source_file&&steady?.source_sheet)source={file:steady.source_file,sheet:steady.source_sheet};}
         jumpToSource(source);
       };
@@ -2266,7 +2269,7 @@
     const activateForecastTab=(id,writeHistory=true)=>{if(!forecastViews.includes(id))return;applyForecastView(root,id);if(state.forecastStage==='launch'&&id==='evidence'){const target=targetState();root.querySelectorAll('[data-forecast-task]').forEach(card=>refreshCardExplanation(card,target));renderForecastReferenceChartV2(root,data,history)}if(writeHistory)syncUrl('push')};
     root.querySelectorAll('[data-forecast-stage-switch]').forEach(button=>button.onclick=()=>activateForecastStage(button.dataset.forecastStageSwitch));
     const forecastTabButtons=[...root.querySelectorAll('[data-forecast-tab]')];
-    forecastTabButtons.forEach((button,index)=>{button.onclick=()=>activateForecastTab(button.dataset.forecastTab);button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?forecastTabButtons.length-1:(index+(event.key==='ArrowRight'?1:-1)+forecastTabButtons.length)%forecastTabButtons.length;forecastTabButtons[next].focus();activateForecastTab(forecastTabButtons[next].dataset.forecastTab)}});
+    forecastTabButtons.forEach(button=>{button.onclick=()=>activateForecastTab(button.dataset.forecastTab);button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const visible=forecastTabButtons.filter(tab=>!tab.hidden&&!tab.disabled),index=visible.indexOf(button),next=event.key==='Home'?0:event.key==='End'?visible.length-1:(index+(event.key==='ArrowRight'?1:-1)+visible.length)%visible.length;visible[next]?.focus();if(visible[next])activateForecastTab(visible[next].dataset.forecastTab)}});
     root.querySelectorAll('[data-forecast-score-jump]').forEach(button=>button.onclick=()=>{activateForecastTab('score');const select=root.querySelector('[data-forecast-score-task]');if(select){select.value=button.dataset.forecastScoreJump;renderScoreDashboard(targetState())}requestAnimationFrame(()=>{const detail=root.querySelector('.forecast-score-detail');if(detail){detail.tabIndex=-1;detail.focus({preventScroll:true});detail.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}})});
     let forecastUpdateTimer=null;const scheduleForecastUpdate=()=>{clearTimeout(forecastUpdateTimer);forecastUpdateTimer=setTimeout(()=>{if(root.isConnected)update()},120)};
     root.querySelectorAll('[data-forecast-input],[data-forecast-allocation]').forEach(input=>input.oninput=()=>{if(['conversion','direct','lock'].includes(input.dataset.forecastInput))setOverride(input.dataset.forecastInput);if(input.dataset.forecastInput==='progressSmallCompletion')progressOverride.small=true;if(input.dataset.forecastInput==='progressDirectCompletion')progressOverride.direct=true;scheduleForecastUpdate()});
@@ -2376,6 +2379,7 @@
 
   let rawRowsCache=[],rawRowsKey=null,rawRenderRevision=0;
   async function loadRawRows(fileIndex,sheetIndex){
+    if(FORECAST_APP)return [];
     const key=`${fileIndex}|${sheetIndex}`;
     if(rawRowsKey===key)return rawRowsCache;
     const b64=RAW_BLOCKS[key]||await getRawBlock(key);
@@ -2384,6 +2388,7 @@
   }
   function visibleRawRows(rows,query){const header=rows.length?[rows[0]]:[];return[...header,...filterRawRows(rows.slice(1),query)]}
   async function renderRaw(){
+    if(FORECAST_APP){state.module="sales_forecast";if(await ensureState()===false)return;await renderAll();syncUrl("replace");return;}
     const revision=++rawRenderRevision,fileIndex=state.rawFile,sheetIndex=state.rawSheet,file=DATA.raw_files[fileIndex]||DATA.raw_files[0],sheet=file?.sheets[sheetIndex]||file?.sheets[0];
     let rows;
     try{rows=await loadRawRows(fileIndex,sheetIndex)}catch(error){
@@ -2477,7 +2482,17 @@
     finally{link.remove();setTimeout(()=>URL.revokeObjectURL(url),500)}
   }
   function csvCell(value){const text=String(value??"");return /[",\r\n]/.test(text)?`"${text.replace(/"/g,'""')}"`:text}
+  function openForecastSourceDetails(source){
+    const details=document.querySelector('.forecast-source-details');if(!details)return;
+    let location=details.querySelector('[data-forecast-source-location]');
+    if(!location){location=document.createElement('div');location.className='forecast-source-decision';location.dataset.forecastSourceLocation='';const label=document.createElement('b');label.textContent='原始位置';location.append(label,document.createElement('span'));details.querySelector('summary').after(location);}
+    const sourceText=typeof source==='string'?source:[source?.file,source?.sheet,source?.cell||source?.range,source?.note].filter(Boolean).join('｜');
+    location.dataset.forecastSourceStage=state.forecastStage;
+    location.querySelector('span').textContent=sourceText;location.hidden=!sourceText;
+    details.open=true;details.querySelector('summary').focus({preventScroll:true});details.scrollIntoView({block:'nearest'});
+  }
   async function jumpToSource(source){
+    if(FORECAST_APP){openForecastSourceDetails(source);return;}
     if(!source){showToast("当前看板没有独立来源");return}
     const fileIndex=DATA.raw_files.findIndex(item=>item.name===source.file);if(fileIndex<0){showToast("未找到对应底表文件");return}
     const sheetIndex=DATA.raw_files[fileIndex].sheets.findIndex(item=>item.name===source.sheet||item.source_sheet===source.sheet);captureForecastDraft();state.module="raw";state.rawFile=fileIndex;state.rawSheet=Math.max(sheetIndex,0);state.rawQuery="";await renderAll();syncUrl("push");$("#rawSearch")?.focus({preventScroll:true});$("#page")?.scrollTo({top:0,behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"});showToast(`已定位到 ${source.sheet}；浏览器后退可返回分析`)

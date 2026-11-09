@@ -22,10 +22,10 @@ from core.china_calendar import PUBLISHED_YEARS
 from core.config import load_config
 from core.data_paths import orders_input_directory, assert_output_is_private, forecast_summary_path, assert_summary_output, project_output_directory
 from core.discovery import discover_subjects, set_capabilities
-from core.excel import WorkbookItem, WorkbookStore, clean_text, format_excel_cell, load_data_workbook, reset_conflict_diagnostics
+from core.excel import WorkbookStore, clean_text, format_excel_cell, reset_conflict_diagnostics
 from core.forecast_summary import SUMMARY_NAME, visible_target_names
 from core.model_identity import FORECAST_SOURCE_PATH
-from core.renderer import b64gzip, render_dashboard, forecast_manifest, write_raw_block_assets
+from core.renderer import b64gzip, render_dashboard, forecast_manifest
 from core.validation import validate_manifest
 from modules.registry import MODULES
 
@@ -337,8 +337,8 @@ def build(
     cache_dir = output_file.parent / ".cache" / "excel"
     store = WorkbookStore(input_dir, cache_dir=cache_dir)
     stage_started = perf_counter()
-    raw_only_names = (SUMMARY_NAME, FORECAST_SOURCE_PATH.name)
-    store.load(exclude_names=set(raw_only_names), data_only_view=config.get("chart_render_mode") == "generated")
+    auxiliary_names = (SUMMARY_NAME, FORECAST_SOURCE_PATH.name)
+    store.load(exclude_names=set(auxiliary_names), data_only_view=config.get("chart_render_mode") == "generated")
     load_seconds = perf_counter() - stage_started
     if not store.items:
         details = "；".join(store.load_errors) if store.load_errors else "目录中没有xlsx文件"
@@ -383,7 +383,7 @@ def build(
                 dashboards[f"{subject.id}|{module.id}"] = store.resolve_dashboard_sources(dashboard).to_dict()
                 capabilities.setdefault("".join(subject.name.split()), set()).add(module.id)
                 matched_modules.append(module.label)
-            LOGGER.debug("主体映射完成: %s -> %s", subject.name, "、".join(matched_modules) if matched_modules else "仅底表")
+            LOGGER.debug("主体映射完成: %s -> %s", subject.name, "、".join(matched_modules) if matched_modules else "暂无预测看板")
         configured_order = config.get("module_order") or []
         known_modules = {module.id for module in MODULES} | {"raw"}
         unknown_modules = [module for module in configured_order if module not in known_modules]
@@ -397,15 +397,7 @@ def build(
         if store.multi_source_groups:
             LOGGER.info("多文件来源：%d类，共%d个文件匹配项参与合并；详细文件名可使用 --debug 查看",
                         len(store.multi_source_groups), sum(store.multi_source_groups.values()))
-        stage_started = perf_counter()
-        # Forecast source/summary sheets belong in the raw center, but must not
-        # create ordinary analysis subjects or feed unrelated dashboard modules.
-        for raw_path in (input_dir / FORECAST_SOURCE_PATH.name, summary_path):
-            if raw_path.exists() and all(item.path.resolve() != raw_path.resolve() for item in store.items):
-                store.items.append(WorkbookItem(raw_path, load_data_workbook(raw_path, cache_dir)))
-        raw_files, raw_blocks = raw_tables(store)
-        raw_seconds = perf_counter() - stage_started
-        manifest = {
+        manifest = forecast_manifest({
             "meta": {
                 "title": config["title"],
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -414,10 +406,7 @@ def build(
             "config": config,
             "subjects": [subject.to_dict() for subject in subjects],
             "dashboards": dashboards,
-            "chart_assets": store.chart_assets,
-            "raw_files": raw_files,
-            "raw_blocks": raw_blocks,
-        }
+        }, forecast_disabled=disable_sales_forecast)
         validation_started = perf_counter()
         validation_warnings = validate_manifest(manifest)
         for warning in validation_warnings:
@@ -425,16 +414,13 @@ def build(
         validation_seconds = perf_counter() - validation_started
         LOGGER.info("开始写入 HTML（主体 %d 个，看板 %d 个）", len(subjects), len(dashboards))
         stage_started = perf_counter()
-        page = forecast_manifest(manifest, forecast_disabled=disable_sales_forecast)
-        if page["dashboards"]:
-            page["raw_block_urls"] = write_raw_block_assets(raw_blocks, output_file)
-        render_dashboard(page, ROOT / "templates", output_file)
-        LOGGER.info("独立销量预测看板: %s（发布时保留 forecast_assets 目录）", output_file)
+        render_dashboard(manifest, ROOT / "templates", output_file)
+        LOGGER.info("独立销量预测看板: %s", output_file)
         render_seconds = perf_counter() - stage_started
         output_size = output_file.stat().st_size
         LOGGER.info("生成HTML体积: %.1fMB", output_size / 1024 / 1024)
         if output_size > 35 * 1024 * 1024:
-            LOGGER.warning("[性能校验] 单HTML超过35MB，建议优先拆分大底表或图表资源")
+            LOGGER.warning("[性能校验] 单HTML超过35MB，请检查预测看板数据体积")
         emitted_messages = "\n".join(BUILD_DIAGNOSTICS)
         warnings = list(dict.fromkeys([
             *BUILD_DIAGNOSTICS,
@@ -473,16 +459,15 @@ def build(
         LOGGER.info("模块耗时: %s", module_summary)
         LOGGER.info(
             "性能汇总: 预测刷新 %.2fs | Excel加载 %.2fs | 主体识别 %.2fs | 模块生成 %.2fs | "
-            "底表整理 %.2fs | 数据校验 %.2fs | HTML输出 %.2fs | 清单/诊断 %.2fs | 其他编排 %.2fs | 总计 %.2fs",
+            "数据校验 %.2fs | HTML输出 %.2fs | 清单/诊断 %.2fs | 其他编排 %.2fs | 总计 %.2fs",
             refresh_seconds,
             load_seconds,
             discovery_seconds,
             sum(module_seconds.values()),
-            raw_seconds,
             validation_seconds,
             render_seconds,
             manifest_seconds,
-            perf_counter() - build_started - sum((refresh_seconds, load_seconds, discovery_seconds, sum(module_seconds.values()), raw_seconds, validation_seconds, render_seconds, manifest_seconds)),
+            perf_counter() - build_started - sum((refresh_seconds, load_seconds, discovery_seconds, sum(module_seconds.values()), validation_seconds, render_seconds, manifest_seconds)),
             perf_counter() - build_started,
         )
         return manifest, warnings
