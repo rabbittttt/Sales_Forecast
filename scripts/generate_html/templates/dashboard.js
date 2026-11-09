@@ -673,7 +673,7 @@
   function applyForecastView(root,id){
     if(!root||!forecastViews.includes(id))return;
     state.forecastView=id;
-    if(FORECAST_APP){document.body.dataset.forecastView=id;root.querySelector('.forecast-general-settings')?.toggleAttribute('hidden',id!=='params');}
+    if(FORECAST_APP)document.body.dataset.forecastView=id;
     const stage=forecastStages.some(item=>item.id===state.forecastStage)?state.forecastStage:"launch",prefix=stage==="launch"?"forecast":`${stage}-forecast`;
     root.querySelectorAll('[data-forecast-tab]').forEach(button=>{const active=button.dataset.forecastTab===id;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active));button.setAttribute('aria-controls',`${prefix}-pane-${button.dataset.forecastTab}`);button.tabIndex=active?0:-1});
     root.querySelectorAll('[data-forecast-pane]').forEach(pane=>pane.classList.toggle('active',pane.dataset.forecastPane===id));
@@ -682,12 +682,9 @@
   }
   function prepareForecastStandalone(root){
     if(!root)return;
-    root.querySelector('.forecast-target-heading').insertAdjacentHTML('beforeend','<button type="button" class="forecast-source-button" data-workspace-source>来源数据</button>');
+    root.querySelector('.forecast-source-details').insertAdjacentHTML('beforebegin','<button type="button" class="forecast-source-button" data-workspace-source>来源数据</button>');
     const evidenceTab=root.querySelector('[data-forecast-tab="evidence"]');
     evidenceTab.insertAdjacentHTML('beforebegin','<button id="forecast-tab-params" role="tab" aria-selected="false" tabindex="-1" data-forecast-tab="params">参数配置</button>');
-    const settings=root.querySelector('.forecast-target-settings'),general=document.createElement('section');
-    general.className='forecast-general-settings forecast-parameters-pane';general.setAttribute('aria-label','车型与时间参数');
-    general.hidden=state.forecastView!=='params';general.append(settings);root.querySelector('.forecast-target').after(general);
     for(const stage of forecastStages){
       const scope=root.querySelector(`[data-forecast-stage-pane="${stage.id}"]`),controls=scope?.querySelector('.forecast-evidence-controls');if(!controls)continue;
       const pane=document.createElement('section'),launch=stage.id==='launch';

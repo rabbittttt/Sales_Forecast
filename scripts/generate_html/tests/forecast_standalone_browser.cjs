@@ -41,7 +41,20 @@ async function run(){
         check(stage+' / '+view+'可见',await page.locator(selector).isVisible());
       }
     }
-    // Edit real controls after they have been relocated to the dedicated params pane.
+    const launchDays=page.locator('.forecast-target [data-forecast-target="days"]');
+    const originalDays=await launchDays.inputValue();
+    const editedDays=originalDays==='5'?'6':'5';
+    const launchStart=await page.locator('.forecast-target [data-forecast-target="launchDate"]').inputValue();
+    const steadyStart=new Date(Date.parse(launchStart+'T00:00:00Z')+Number(editedDays)*86400000).toISOString().slice(0,10);
+    await launchDays.fill(editedDays);
+    await page.waitForFunction(({days,steady})=>{
+      const text=document.querySelector('[data-forecast-time-summary]').textContent;
+      return text.includes('共'+days+'天')&&text.includes('平销自 '+steady+' 起');
+    },{days:editedDays,steady:steadyStart});
+    check('预测结论页的页头天数输入实时更新首销与平销时间口径',true);
+    await launchDays.fill(originalDays);
+    await launchDays.press('Tab');
+    // Edit the stage-specific controls in the dedicated params pane.
     await page.locator('[data-forecast-tab="params"]').click();
     const conversion=page.locator('[data-forecast-input="conversion"]');
     await conversion.fill('41.2');await conversion.dispatchEvent('change');
@@ -102,10 +115,8 @@ async function run(){
       await page.setViewportSize({width,height:1000});
       check(width+'px预测导航无返回订单分析入口',await page.locator('.forecast-order-link').count()===0&&await page.getByRole('link',{name:'返回订单分析'}).count()===0);
       check(width+'px预测导航仅含三阶段和底表',JSON.stringify(await page.locator('[data-forecast-nav]').evaluateAll(nodes=>nodes.map(node=>node.dataset.forecastNav)))===JSON.stringify(['small','launch','steady','raw'])&&JSON.stringify(await page.locator('#moduleSelect option').evaluateAll(nodes=>nodes.map(node=>node.value)))===JSON.stringify(['small','launch','steady','raw']));
-      await page.locator('[data-forecast-tab="params"]').click();
-      const layout=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,fields:[...document.querySelectorAll('.forecast-general-settings [data-forecast-target]')].map(n=>{const b=n.getBoundingClientRect();return {left:b.left,right:b.right,width:b.width,height:b.height};})}));
-      report.layout.push(layout);check(width+'px参数区域与页面无横向裁切',layout.scroll<=width+1&&layout.fields.length===9&&layout.fields.every(b=>b.left>=0&&b.right<=width+1&&b.width>0&&b.height>0));
-      await page.locator('[data-forecast-tab="result"]').click();
+      const layout=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,fields:[...document.querySelectorAll('.forecast-target>.forecast-target-settings [data-forecast-target]')].map(n=>{const b=n.getBoundingClientRect();return {left:b.left,right:b.right,width:b.width,height:b.height};})}));
+      report.layout.push(layout);check(width+'px页头9个参数可见且无横向裁切',layout.scroll<=width+1&&layout.fields.length===9&&layout.fields.every(b=>b.left>=0&&b.right<=width+1&&b.width>0&&b.height>0));
       check(width+'px结果区域无整页横向溢出',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
     }
     const filePage=await context.newPage();filePage.on('pageerror',e=>report.errors.push(e.message));
