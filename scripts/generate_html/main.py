@@ -17,6 +17,7 @@ from time import perf_counter
 from typing import Any
 from openpyxl import load_workbook
 
+from core.build_lock import build_lock
 from core.components import add_kpi_comparisons
 from core.china_calendar import PUBLISHED_YEARS
 from core.config import load_config
@@ -120,6 +121,8 @@ def refresh_sales_forecast_data(config: dict[str, Any], input_dir: Path | None =
     child_env["PYTHONIOENCODING"] = "utf-8"
     child_env["PYTHONUTF8"] = "1"
     command = [sys.executable, "-u", str(script)]
+    if config.get("force_sales_forecast_data_refresh"):
+        command.append("--force")
     if LOGGER.isEnabledFor(logging.DEBUG):
         command.append("--debug")
     if input_dir is not None:
@@ -309,7 +312,7 @@ def raw_tables(store: WorkbookStore) -> tuple[list[dict[str, Any]], dict[str, st
 
 
 def build(
-    input_dir: Path, output_file: Path, *, disable_sales_forecast: bool = False
+    input_dir: Path, output_file: Path, *, disable_sales_forecast: bool = False, force_refresh: bool = False
 ) -> tuple[dict[str, Any], list[str]]:
     build_started = perf_counter()
     assert_output_is_private(output_file)
@@ -317,6 +320,9 @@ def build(
     LOGGER.info("输入目录: %s", input_dir)
     LOGGER.info("输出文件: %s", output_file)
     config = load_config(ROOT / "config.json")
+    if force_refresh:
+        config["refresh_sales_forecast_data_before_build"] = True
+        config["force_sales_forecast_data_refresh"] = True
     if disable_sales_forecast:
         config["refresh_sales_forecast_data_before_build"] = False
         LOGGER.info("销量预测：已按本次运行参数禁用，导航保留置灰，跳过预测刷新及计算")
@@ -486,6 +492,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--check", action="store_true", help="Return a non-zero exit code when validation warnings exist.")
     parser.add_argument("--no-open", action="store_true", help="Generate the HTML without opening the default browser.")
     parser.add_argument("--debug", action="store_true", help="输出调试日志，用于排查数据解析问题。")
+    parser.add_argument("--force-refresh", action="store_true", help="强制从原始输入重算共享汇总。")
     parser.add_argument(
         "--disable-sales-forecast",
         action="store_true",
@@ -516,44 +523,46 @@ def cleanup_input_cache(output_dir: Path) -> None:
 def main() -> int:
     args = parse_args()
     assert_output_is_private(args.output)
-    log_file = configure_runtime(args.output.parent, args.debug)
-    try:
-        manifest, warnings = build(
-            args.input, args.output, disable_sales_forecast=args.disable_sales_forecast
-        )
-    except Exception:
-        LOGGER.exception("生成失败，请根据上方错误和日志排查")
-        LOGGER.error("运行日志: %s", log_file)
-        return 1
-    finally:
-        cleanup_input_cache(args.output.parent)
-        refresh_output_dir = project_output_directory(PROJECT_ROOT)
-        if args.output.parent.resolve() != refresh_output_dir.resolve():
-            cleanup_input_cache(refresh_output_dir)
-    errors = DIAGNOSTIC_COUNTS["ERROR"]
-    if errors:
-        LOGGER.error("生成不完整：发生%d条错误；已保留可用HTML供排查，不自动打开: %s",
-                     errors, args.output, extra={"diagnostic_continuation": True})
-    else:
-        LOGGER.info("生成成功: %s", args.output)
-    LOGGER.info("汇总: 主体=%d，看板=%d, 问题=%d", len(manifest["subjects"]), len(manifest["dashboards"]), len(warnings))
-    LOGGER.info("运行日志: %s", log_file)
-    if errors:
-        return 1
-    if AUTO_OPEN_HTML and not args.no_open:
+    with build_lock(PROJECT_ROOT):
+        log_file = configure_runtime(args.output.parent, args.debug)
         try:
-            if sys.platform == "win32":
-                os.startfile(args.output)  # 用系统默认应用打开
-                opened = True
-            else:
-                opened = webbrowser.open(args.output.resolve().as_uri())
-            if opened:
-                LOGGER.info("已调用系统默认应用打开看板")
-            else:
-                LOGGER.warning("系统没有确认看板已打开，请手动打开: %s", args.output)
+            manifest, warnings = build(
+                args.input, args.output, disable_sales_forecast=args.disable_sales_forecast,
+                force_refresh=getattr(args, "force_refresh", False),
+            )
         except Exception:
-            LOGGER.exception("自动打开看板失败，请手动打开HTML")
-    return 1 if args.check and warnings else 0
+            LOGGER.exception("生成失败，请根据上方错误和日志排查")
+            LOGGER.error("运行日志: %s", log_file)
+            return 1
+        finally:
+            cleanup_input_cache(args.output.parent)
+            refresh_output_dir = project_output_directory(PROJECT_ROOT)
+            if args.output.parent.resolve() != refresh_output_dir.resolve():
+                cleanup_input_cache(refresh_output_dir)
+        errors = DIAGNOSTIC_COUNTS["ERROR"]
+        if errors:
+            LOGGER.error("生成不完整：发生%d条错误；已保留可用HTML供排查，不自动打开: %s",
+                         errors, args.output, extra={"diagnostic_continuation": True})
+        else:
+            LOGGER.info("生成成功: %s", args.output)
+        LOGGER.info("汇总: 主体=%d，看板=%d, 问题=%d", len(manifest["subjects"]), len(manifest["dashboards"]), len(warnings))
+        LOGGER.info("运行日志: %s", log_file)
+        if errors:
+            return 1
+        if AUTO_OPEN_HTML and not args.no_open:
+            try:
+                if sys.platform == "win32":
+                    os.startfile(args.output)  # 用系统默认应用打开
+                    opened = True
+                else:
+                    opened = webbrowser.open(args.output.resolve().as_uri())
+                if opened:
+                    LOGGER.info("已调用系统默认应用打开看板")
+                else:
+                    LOGGER.warning("系统没有确认看板已打开，请手动打开: %s", args.output)
+            except Exception:
+                LOGGER.exception("自动打开看板失败，请手动打开HTML")
+        return 1 if args.check and warnings else 0
 
 
 if __name__ == "__main__":
