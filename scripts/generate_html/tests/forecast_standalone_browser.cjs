@@ -4,7 +4,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const http=require('node:http');
 const {pathToFileURL}=require('node:url');
 const project=path.resolve(__dirname,'../../..');
-const output=process.env.FORECAST_OUTPUT_DIR||path.join(project,'output_file');
+const output=process.env.FORECAST_OUTPUT_DIR||path.join(project,'output_file/static');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||path.join(project,'.test_runtime/node_modules/playwright'));
 const forecastName='鸿蒙智行销量预测.html';
 const target='问界 M9 2026款',report={checks:[],errors:[],layout:[]};

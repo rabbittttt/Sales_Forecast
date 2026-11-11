@@ -9,7 +9,7 @@ const {chromium}=require(path.join(root,'.test_runtime/node_modules/playwright')
  try{
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
   page.on('pageerror',error=>errors.push(error.message));
-  const url=pathToFileURL(path.join(root,'output_file/鸿蒙智行销量预测.html'));
+  const url=pathToFileURL(path.join(root,'output_file/static/鸿蒙智行销量预测.html'));
   await page.goto(url.href);await page.waitForFunction(()=>document.querySelector('#updatedAt')?.textContent);
   for(const width of [1440,1024,768,390]){
    await page.setViewportSize({width,height:900});

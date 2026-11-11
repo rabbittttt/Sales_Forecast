@@ -104,3 +104,92 @@ console.log(JSON.stringify({status,total:node('[data-small-kpi="total"]').textCo
         self.assertTrue(data['hidden'])
         self.assertIn('D3', data['status']['small']['label'])
         self.assertNotIn('判定中', data['status']['small']['label'])
+
+    def test_static_page_move_migrates_only_valid_same_project_file_state(self):
+        script = r"""
+const fs=require('fs'),assert=require('assert');
+const source=fs.readFileSync(DASHBOARD,'utf8');
+const start=source.indexOf('  function persistForecastState(){');
+const end=source.indexOf('  loadForecastState();',start);
+assert(start>=0&&end>start,'production state loader must be found');
+const load=new Function('location','localStorage','FORECAST_APP',`
+  const DATA={},forecastStages=[{id:'small'},{id:'launch'},{id:'steady'}];
+  const forecastStorageKey='sales-forecast-independent-v1:'+location.pathname;
+  const forecastDrafts=new Map(),importedForecastRows=new Map(),forecastImportScopes=new Map();
+  let forecastStorageWarning='';
+  ${source.slice(start,end)}
+  loadForecastState();
+  return {drafts:[...forecastDrafts],imports:[...importedForecastRows],
+    scopes:[...forecastImportScopes],warning:forecastStorageWarning};
+`);
+const prefix='sales-forecast-independent-v1:';
+const page=new URL('file:///D:/workspace/forecast/output_file/static/report.html');
+const oldKey=prefix+'/D:/workspace/forecast/output_file/report.html';
+const newKey=prefix+page.pathname;
+const harmonyKey='harmony-forecast-v1:/D:/workspace/forecast/output_file/report.html';
+const saved={version:1,
+  drafts:[['generation-test',{generatedAt:'2026-11-11T00:00:00',meta:{parameterOverrides:['direct']},
+    controls:[{key:'|INPUT|data-forecast-input=direct|type=number',value:'42',checked:null}]}]],
+  imports:[['测试车型',{filename:'预测.csv',rows:[
+    {model:'测试车型',date:'2026-11-13',metric:'gross',quantity:25,stage:'launch',source:'预测.csv'},
+    {model:'测试车型',date:'2026-11-14',metric:'small',quantity:0,stage:'small',source:'预测.csv'}]}]],
+  scopes:[['测试车型',{launch:'all',small:'future'}]]};
+const raw=JSON.stringify(saved);
+function probe(location,initial,app=true){
+  const storage=new Map(Object.entries(initial)),reads=[],writes=[];
+  const result=load(location,{
+    getItem:key=>{reads.push(key);return storage.has(key)?storage.get(key):null},
+    setItem:(key,value)=>{writes.push(key);storage.set(key,value)}
+  },app);
+  return {result,storage,reads,writes};
+}
+const moved=probe(page,{[oldKey]:raw,[harmonyKey]:'not forecast state'});
+assert.deepEqual(moved.result.drafts,saved.drafts);
+assert.deepEqual(moved.result.imports,saved.imports);
+assert.deepEqual(moved.result.scopes,saved.scopes);
+assert.equal(moved.result.warning,'');
+assert.deepEqual(moved.writes,[newKey]);
+assert.deepEqual(JSON.parse(moved.storage.get(newKey)),saved);
+assert.equal(moved.storage.get(oldKey),raw,'migration copies, never deletes the old state');
+assert.deepEqual(moved.reads,[newKey,oldKey]);
+const newer=JSON.parse(raw);newer.drafts[0][1].controls[0].value='73';newer.imports[0][1].rows[0].quantity=99;
+const preferred=probe(page,{[newKey]:JSON.stringify(newer),[oldKey]:raw});
+assert.deepEqual(preferred.result.drafts,newer.drafts);
+assert.deepEqual(preferred.result.imports,newer.imports);
+assert.deepEqual(preferred.reads,[newKey]);
+assert.deepEqual(preferred.writes,[]);
+for(const location of [
+  new URL('http://127.0.0.1:8780/output_file/static/report.html'),
+  new URL('http://127.0.0.1:8780/'),
+  new URL('file:///D:/workspace/forecast/output_file/dynamic/report.html'),
+  new URL('file:///D:/workspace/forecast/reports/static/report.html')]){
+  const blocked=probe(location,{[oldKey]:raw});
+  assert.deepEqual(blocked.reads,[prefix+location.pathname]);
+  assert.deepEqual(blocked.writes,[]);
+  assert.deepEqual(blocked.result.drafts,[]);
+  assert.deepEqual(blocked.result.imports,[]);
+}
+const wrongApp=probe(page,{[oldKey]:raw},false);
+assert.deepEqual(wrongApp.reads,[newKey]);assert.deepEqual(wrongApp.writes,[]);
+const otherProject=probe(page,{[prefix+'/D:/workspace/another/output_file/report.html']:raw,[harmonyKey]:raw});
+assert.deepEqual(otherProject.result.drafts,[]);
+assert.deepEqual(otherProject.result.imports,[]);
+assert.deepEqual(otherProject.writes,[]);
+assert(!otherProject.reads.some(key=>key.startsWith('harmony-forecast-v1:')));
+const invalid=JSON.parse(raw);invalid.imports[0][1].rows[0].quantity=-1;
+for(const bad of ['{broken json',JSON.stringify(invalid)]){
+  const rejected=probe(page,{[oldKey]:bad});
+  assert(rejected.result.warning);
+  assert.deepEqual(rejected.result.drafts,[],'invalid imported state cannot partly restore its valid draft');
+  assert.deepEqual(rejected.result.imports,[]);
+  assert.deepEqual(rejected.writes,[]);
+  assert.equal(rejected.storage.get(oldKey),bad);
+  assert(!rejected.storage.has(newKey));
+}
+const corruptNew=probe(page,{[newKey]:'{broken json',[oldKey]:raw});
+assert(corruptNew.result.warning);assert.deepEqual(corruptNew.reads,[newKey]);
+assert.deepEqual(corruptNew.writes,[]);assert.deepEqual(corruptNew.result.drafts,[]);
+console.log('PASS static file state migration, new-state priority, protocol/project isolation and validation');
+""".replace('DASHBOARD', json.dumps(str(ROOT / 'templates/dashboard.js')))
+        result = subprocess.run(['node', '-e', script], capture_output=True, encoding='utf-8', timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)

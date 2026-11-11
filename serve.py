@@ -1,9 +1,7 @@
-"""Run the live forecast service from any working directory."""
+"""Compatibility entry point for 动态网页/serve.py."""
 from pathlib import Path
 import runpy
-import sys
 
 if __name__ == "__main__":
-    code = Path(__file__).resolve().parent / "scripts" / "generate_html"
-    sys.path.insert(0, str(code))
-    runpy.run_path(str(code / "server.py"), run_name="__main__")
+    entry = Path(__file__).resolve().parent / "动态网页" / "serve.py"
+    runpy.run_path(str(entry), run_name="__main__")

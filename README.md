@@ -6,39 +6,62 @@
 
 ## 运行
 
-所有项目默认共用所在 `Project/.venv`。新电脑先安装 Python 3.11 或更新版本（共享环境要求），在 `Project` 根目录双击“初始化共享环境.cmd”重建共享环境并安装依赖。项目位于 `Project/销量预测/` 时，也可在本项目目录手动安装依赖、启动：
+静态网页与动态网页分别启动，输出也分别保存：
+
+```text
+销量预测/
+├─ 静态网页/
+│  ├─ main.py
+│  └─ 运行静态销量预测.bat
+├─ 动态网页/
+│  ├─ serve.py
+│  └─ 运行动态销量预测.bat
+├─ output_file/
+│  ├─ static/
+│  │  ├─ 鸿蒙智行销量预测.html
+│  │  └─ log/
+│  └─ dynamic/
+│     └─ log/
+├─ main.py、运行销量预测.bat          （兼容静态入口）
+└─ serve.py、运行动态销量预测.bat    （兼容动态入口）
+```
+
+所有项目默认共用所在 `Project/.venv`。新电脑先安装 Python 3.11 或更新版本（共享环境要求），在 `Project` 根目录双击“初始化共享环境.cmd”重建共享环境并安装依赖。也可在本项目根目录手动安装：
 
 ```powershell
 ..\.venv\Scripts\python.exe -m pip install -r requirements.txt
-..\.venv\Scripts\python.exe main.py
 ```
 
-换电脑后应重新创建 `Project/.venv`，不要直接复制旧电脑的虚拟环境。整体移动 `Project` 时保留项目与共享目录的相对位置；`Project` 的上级目录和盘符可以不同。
+启动脚本从项目根目录向上找到最近名为 `Project` 的目录，使用其中 `.venv\Scripts\python.exe`。可用 `SALES_FORECAST_PYTHON` 指定其他解释器文件，相对路径始终按本项目根目录解析。启动窗口显示所选 Python，环境缺失或依赖不全时停止并提示处理命令。
 
-`运行销量预测.bat` 从脚本所在目录向上找到最近名为 `Project` 的目录，固定使用其中 `.venv\Scripts\python.exe`，忽略子项目自己的 `.venv`，也不回退 PATH 或 Codex Python。可用 `SALES_FORECAST_PYTHON` 显式指定其他解释器文件；相对路径按本项目目录解析。启动窗口显示所选 Python，并在环境缺失或依赖不全时停止，提示初始化或安装命令。
+换电脑后应重新创建 `Project/.venv`，不要直接复制旧电脑的虚拟环境。整体移动 `Project` 时保留项目与共享目录的相对位置，上级目录和盘符可以不同。
 
-也可双击根目录的“运行销量预测.bat”。只生成文件、不打开浏览器：`..\.venv\Scripts\python.exe main.py --no-open`。
-也可直接运行 `scripts/generate_html/main.py`。启动位置不影响默认输入、输出路径。
+### 静态网页
 
-生成结果：`output_file/鸿蒙智行销量预测.html`。
-预测看板为单个 HTML 文件，可直接打开。
+双击 `静态网页/运行静态销量预测.bat`，生成并打开 `output_file/static/鸿蒙智行销量预测.html`。生成后可直接打开该 HTML，无需保持启动窗口运行，下次手动运行时更新数据。日志位于 `output_file/static/log/`。
+
+在项目根目录运行命令，只生成文件、不打开浏览器：
+
+```powershell
+..\.venv\Scripts\python.exe 静态网页/main.py --no-open
+```
 
 ### 动态网页
 
-双击根目录的“运行动态销量预测.bat”，会使用与静态入口相同的 Python 环境，启动本地服务并打开浏览器。默认地址为 `http://127.0.0.1:8780/`。
+双击 `动态网页/运行动态销量预测.bat`，启动本地服务并打开浏览器，默认地址为 `http://127.0.0.1:8780/`。动态结果位于 `output_file/dynamic/`，日志位于 `output_file/dynamic/log/`。
 
-服务每 300 秒检查共享原始输入，发现变化后，等待文件连续稳定 60 秒再更新预测。更新完成后，浏览器自动刷新。首次启动也会等待连续稳定 60 秒，期间可查看已有结果。使用期间保持服务窗口打开，按 `Ctrl+C` 停止服务。
+服务每 300 秒检查共享原始输入，发现变化后，等待文件连续稳定 60 秒再更新预测。更新完成后，浏览器自动刷新。首次启动也会等待连续稳定 60 秒，期间可查看已有结果。更新失败时保留上次成功页面并自动重试。使用期间保持服务窗口打开，按 `Ctrl+C` 停止服务。
 
-也可手动运行：
+在项目根目录手动启动：
 
 ```powershell
-..\.venv\Scripts\python.exe serve.py
-..\.venv\Scripts\python.exe serve.py --host 127.0.0.1 --port 8780 --no-open
+..\.venv\Scripts\python.exe 动态网页/serve.py
+..\.venv\Scripts\python.exe 动态网页/serve.py --host 127.0.0.1 --port 8780 --no-open
 ```
 
-动态结果保存在本项目 `output_file/live/` 下，更新失败时保留上次成功页面并自动重试。动态地址与直接打开静态文件的浏览器人工参数各自保存。
+`--no-open` 只关闭自动打开浏览器。动态地址与直接打开静态文件的浏览器人工参数各自保存。
 
-`--no-open` 只关闭自动打开浏览器。原 `main.py` 和“运行销量预测.bat”继续按原方式生成静态 HTML，可单独使用。
+根目录原有 `main.py`、`serve.py` 和两个启动脚本保留兼容，分别转到对应入口，命令行参数继续有效。启动位置不影响默认输入、输出路径。
 
 ## 输入与输出
 
@@ -47,8 +70,8 @@
 - 可用 `SHARED_DATA_ROOT` 指定其他共享根目录；相对值相对于本项目根目录解析。
 - 不读取“订单分析”的目录，不回退本地旧输入副本。缺少共享数据时明确报错。
 - 本项目重新计算的销量数据汇总写入 `../共享数据/订单汇总/鸿蒙智行销量数据汇总.xlsx`，预测读取这份共享汇总，不回退 `output_file/` 中的旧汇总。设置 `SHARED_DATA_ROOT` 时，汇总位于所指定共享根的 `订单汇总/` 下。
-- 该销量汇总是本项目唯一允许写入的共享派生文件；共享原始输入只读，其他共享文件不得覆盖。HTML 默认生成在本项目 `output_file/`。
-- 日志保存在 `output_file/log/`，缓存仅在本项目输出目录下创建。运行结束清理自身缓存。
+- 该销量汇总是本项目唯一允许写入的共享派生文件；共享原始输入只读，其他共享文件不得覆盖。静态 HTML 默认生成在本项目 `output_file/static/`，动态结果保存在 `output_file/dynamic/`。
+- 静态和动态日志分别保存在 `output_file/static/log/`、`output_file/dynamic/log/`，缓存仅在本项目输出目录下创建。运行结束清理自身缓存。
 - 人工更新共享原始输入后，各项目下次运行会读取新数据；销量预测刷新共享销量汇总后，使用该汇总的项目也会读取到新版本。两边的代码和配置仍独立维护。
 
 `main.py --input` 可显式指定订单输入目录，`main.py --output` 只指定 HTML 输出位置；日志和网页读取缓存随 HTML 输出目录保存；刷新缓存固定在本项目 `output_file/.cache/`，运行结束会同时清理两处缓存，销量汇总仍写入上述固定共享位置。HTML、日志和缓存不得放进共享数据目录。

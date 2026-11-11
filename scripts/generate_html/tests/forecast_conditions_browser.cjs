@@ -1,7 +1,7 @@
 // Real main output only; scenarios are injected in memory, never extra HTML.
 const fs=require('fs'),path=require('path'),assert=require('assert'),{pathToFileURL}=require('url');
 const project=path.resolve(__dirname,'../../..'),{chromium}=require(path.join(project,'.test_runtime/node_modules/playwright'));
-const url=pathToFileURL(path.join(project,'output_file/鸿蒙智行销量预测.html'));
+const url=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
 url.search=new URLSearchParams({module:'sales_forecast',subject:'问界 M9 2026款',forecastStage:'launch',forecastView:'result'});
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'msedge'}),errors=[];let checks=0;

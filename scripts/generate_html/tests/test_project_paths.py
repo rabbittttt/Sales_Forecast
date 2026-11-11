@@ -45,6 +45,20 @@ class ProjectPathIsolationTests(TestCase):
         self.assertNotIn(local, HISTORY_CANDIDATES)
         self.assertFalse(data_paths.excel_cache_directory().is_relative_to(data_paths.shared_data_root()))
 
+    def test_static_and_dynamic_reports_share_only_the_private_output_root(self):
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {"SHARED_DATA_ROOT": ""}):
+            project = Path(directory) / "销量预测"
+            output = data_paths.project_output_directory(project)
+            static = data_paths.static_output_directory(project)
+            dynamic = data_paths.dynamic_output_directory(project)
+            self.assertEqual(static, output / "static")
+            self.assertEqual(dynamic, output / "dynamic")
+            self.assertNotEqual(static, dynamic)
+            self.assertFalse(static.is_relative_to(dynamic))
+            self.assertFalse(dynamic.is_relative_to(static))
+            self.assertEqual(data_paths.excel_cache_directory(project), output / ".cache" / "excel")
+            self.assertFalse(output.exists())
+
     def test_only_the_shared_summary_can_be_written_and_caches_stay_private(self):
         with TemporaryDirectory() as directory:
             shared = (Path(directory) / "共享输入").resolve()

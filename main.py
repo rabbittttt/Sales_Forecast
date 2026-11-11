@@ -1,9 +1,7 @@
-"""Run the independent forecast from any working directory."""
+"""Compatibility entry point for 静态网页/main.py."""
 from pathlib import Path
 import runpy
-import sys
 
 if __name__ == "__main__":
-    code = Path(__file__).resolve().parent / "scripts" / "generate_html"
-    sys.path.insert(0, str(code))
-    runpy.run_path(str(code / "main.py"), run_name="__main__")
+    entry = Path(__file__).resolve().parent / "静态网页" / "main.py"
+    runpy.run_path(str(entry), run_name="__main__")

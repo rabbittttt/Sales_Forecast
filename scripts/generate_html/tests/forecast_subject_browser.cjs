@@ -4,7 +4,7 @@ const project=path.resolve(__dirname,'../../..');
 const {chromium}=require(path.join(project,'.test_runtime/node_modules/playwright'));
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'msedge'}),page=await browser.newPage(),errors=[];
- const base=pathToFileURL(path.join(project,'output_file/鸿蒙智行销量预测.html'));
+ const base=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
  page.on('pageerror',error=>errors.push(error.message));
  try{
   await page.goto(base.href);await page.waitForFunction(()=>document.querySelector('#subjectSelect option'));

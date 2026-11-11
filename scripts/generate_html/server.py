@@ -16,7 +16,8 @@ import json
 import webbrowser
 
 from core.data_paths import (
-    PROJECT_ROOT, assert_output_is_private, orders_input_directory, project_output_directory,
+    PROJECT_ROOT, assert_output_is_private, orders_input_directory,
+    dynamic_output_directory, static_output_directory,
 )
 from core.live_server import ForecastServer, LiveMonitor, scan_inputs
 from core.renderer import FORECAST_PAGE_NAME
@@ -56,7 +57,7 @@ def parse_args():
 
 def main() -> int:
     args = parse_args()
-    output_root = project_output_directory(PROJECT_ROOT)
+    output_root = dynamic_output_directory(PROJECT_ROOT)
     log_dir = output_root / "log"
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s",
@@ -64,13 +65,13 @@ def main() -> int:
                                   logging.FileHandler(log_dir / "live_server.log", encoding="utf-8")])
     input_dir = args.input.resolve()
     instance_id = hashlib.sha256(f"{PROJECT_ROOT}|{input_dir}|{orders_input_directory(PROJECT_ROOT).resolve()}".encode("utf-8")).hexdigest()
-    live_dir = assert_output_is_private(output_root / "live" / instance_id[:12])
+    live_dir = assert_output_is_private(output_root / instance_id[:12])
     monitor = LiveMonitor(lambda: scan_inputs(input_dir),
                           lambda: build_page(input_dir, live_dir),
                           output_file=live_dir / FORECAST_PAGE_NAME)
     previous_pages = [live_dir / FORECAST_PAGE_NAME]
     if input_dir == orders_input_directory(PROJECT_ROOT).resolve():
-        previous_pages.append(output_root / FORECAST_PAGE_NAME)
+        previous_pages.append(static_output_directory(PROJECT_ROOT) / FORECAST_PAGE_NAME)
     for previous in previous_pages:
         if previous.is_file():
             monitor.seed(previous.read_bytes())

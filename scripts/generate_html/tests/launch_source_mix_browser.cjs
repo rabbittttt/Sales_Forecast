@@ -7,7 +7,7 @@ const {chromium}=require(path.join(project,'.test_runtime/node_modules/playwrigh
  try{
   const page=await browser.newPage({viewport:{width:1440,height:1000}});
   page.on('pageerror',e=>errors.push(e.message));
-  const url=pathToFileURL(path.join(project,'output_file/鸿蒙智行销量预测.html'));
+  const url=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
   url.search=new URLSearchParams({module:'sales_forecast',subject:'问界 M9 2026款',forecastStage:'launch',forecastView:'evidence'});
   await page.goto(url.href);await page.waitForSelector('.forecast-workspace');
   const root=page.locator('.forecast-workspace'),input=k=>page.locator('[data-forecast-input="'+k+'"]');

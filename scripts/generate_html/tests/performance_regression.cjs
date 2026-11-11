@@ -4,7 +4,7 @@ const project=path.resolve(__dirname,'../../..'),{chromium}=require(path.join(pr
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'msedge'}),page=await browser.newPage({reducedMotion:'reduce'}),errors=[];
  page.on('pageerror',e=>errors.push(e.message));
- const url=pathToFileURL(path.join(project,'output_file/鸿蒙智行销量预测.html'));
+ const url=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
  url.search=new URLSearchParams({module:'sales_forecast',subject:'问界 M9 2026款',forecastStage:'launch',forecastView:'result'});
  const ready=()=>page.waitForFunction(()=>document.querySelector('#page')?.getAttribute('aria-busy')==='false');
  const snapshot=()=>page.locator('.forecast-workspace').evaluate(n=>JSON.stringify({launch:n._forecastComparison,small:n._smallForecastResult,steady:n._steadyForecastResult}));

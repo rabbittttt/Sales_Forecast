@@ -68,5 +68,13 @@ def project_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
     return assert_output_is_private(Path(project_root) / "output_file", project_root)
 
 
+def static_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
+    return project_output_directory(project_root) / "static"
+
+
+def dynamic_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
+    return project_output_directory(project_root) / "dynamic"
+
+
 def excel_cache_directory(project_root: Path = PROJECT_ROOT) -> Path:
     return project_output_directory(project_root) / ".cache" / "excel"

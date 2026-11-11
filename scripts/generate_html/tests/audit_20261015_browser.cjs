@@ -1,7 +1,7 @@
 // Formal main.py output only; synthetic records stay in isolated browser memory.
 const fs=require('fs'),path=require('path'),assert=require('assert'),zlib=require('zlib'),{pathToFileURL}=require('url');
 const project=path.resolve(__dirname,'../../..'),{chromium}=require(path.join(project,'.test_runtime/node_modules/playwright'));
-const base=pathToFileURL(path.join(project,'output_file/鸿蒙智行销量预测.html'));
+const base=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'msedge'}),errors=[],checks=[];
  try{

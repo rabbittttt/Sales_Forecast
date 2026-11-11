@@ -3,7 +3,7 @@ const fs=require('fs'),path=require('path'),assert=require('assert'),{pathToFile
 const codeRoot=path.resolve(__dirname,'../..');
 const root=path.basename(codeRoot).toLowerCase()==='scripts'?path.dirname(codeRoot):codeRoot;
 const {chromium}=require(path.join(root,'.test_runtime/node_modules/playwright'));
-const file=process.env.FORECAST_STATE_HTML||path.join(root,'output_file/鸿蒙智行销量预测.html');
+const file=process.env.FORECAST_STATE_HTML||path.join(root,'output_file/static/鸿蒙智行销量预测.html');
 const out=path.join(root,'analysis_outputs/forecast_compact_20260923');fs.mkdirSync(out,{recursive:true});
 const target='问界 M9 2026款',report={checks:[],errors:[],layout:[]},check=(name,value)=>{assert(value,name);report.checks.push(name);console.log('PASS',name);};
 const url=pathToFileURL(path.resolve(file));url.search=new URLSearchParams({module:'sales_forecast',subject:target,forecastStage:'launch',forecastView:'result'});

@@ -6,7 +6,7 @@ const {chromium}=require(path.join(project,'.test_runtime/node_modules/playwrigh
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'msedge'});
  const page=await browser.newPage({viewport:{width:1440,height:1100}}),errors=[],sizes=[],hashes={};
- const base=pathToFileURL(path.join(project,'output_file/鸿蒙智行销量预测.html'));
+ const base=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
  const output=path.join(project,'.test_outputs/forecast_density');fs.mkdirSync(output,{recursive:true});
  const expected=process.env.FORECAST_DENSITY_EXPECTED;let checks=0;
  const check=(name,ok)=>{assert(ok,name);checks++;};

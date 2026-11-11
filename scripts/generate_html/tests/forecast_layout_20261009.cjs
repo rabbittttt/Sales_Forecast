@@ -9,7 +9,7 @@ const before=process.argv.includes('--before'),out=path.join(project,'.test_outp
  const page=await browser.newPage({viewport:{width:1440,height:1000},timezoneId:'Asia/Shanghai',reducedMotion:'reduce'});
  page.on('pageerror',e=>errors.push(e.message));
  try{
-  const url=pathToFileURL(path.join(project,'output_file/鸿蒙智行销量预测.html'));
+  const url=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
   url.search=new URLSearchParams({module:'sales_forecast',subject:'问界 M9 2026款',forecastStage:'small',forecastView:'result'});
   await page.goto(url.href);await page.waitForFunction(()=>document.querySelector('.forecast-workspace')?._forecastComparison);
   const snapshot=await page.locator('.forecast-workspace').evaluate(root=>({

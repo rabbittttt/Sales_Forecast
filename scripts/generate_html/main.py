@@ -21,7 +21,7 @@ from core.build_lock import build_lock
 from core.components import add_kpi_comparisons
 from core.china_calendar import PUBLISHED_YEARS
 from core.config import load_config
-from core.data_paths import orders_input_directory, assert_output_is_private, forecast_summary_path, assert_summary_output, project_output_directory
+from core.data_paths import orders_input_directory, assert_output_is_private, forecast_summary_path, assert_summary_output, project_output_directory, static_output_directory
 from core.discovery import discover_subjects, set_capabilities
 from core.excel import WorkbookStore, clean_text, format_excel_cell, reset_conflict_diagnostics
 from core.forecast_summary import SUMMARY_NAME, visible_target_names
@@ -487,7 +487,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=PROJECT_ROOT / "output_file" / "鸿蒙智行销量预测.html",
+        default=static_output_directory(PROJECT_ROOT) / "鸿蒙智行销量预测.html",
     )
     parser.add_argument("--check", action="store_true", help="Return a non-zero exit code when validation warnings exist.")
     parser.add_argument("--no-open", action="store_true", help="Generate the HTML without opening the default browser.")

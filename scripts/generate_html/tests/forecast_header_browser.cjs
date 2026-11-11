@@ -3,7 +3,7 @@ const path=require('path'),assert=require('assert'),fs=require('fs'),{pathToFile
 const project=path.resolve(__dirname,'../../..');
 const {chromium}=require(path.join(project,'.test_runtime/node_modules/playwright'));
 const parent='问界 M7 2024款',campaign=parent+' Ultra版';
-const base=pathToFileURL(path.join(project,'output_file/鸿蒙智行销量预测.html'));
+const base=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'msedge'}),errors=[];let checks=0;
  const page=await browser.newPage({viewport:{width:1440,height:1000}});

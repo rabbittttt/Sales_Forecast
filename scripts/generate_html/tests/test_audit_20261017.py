@@ -59,7 +59,7 @@ const project=path.resolve('../..'),{chromium}=require(path.join(project,'.test_
  const cases=JSON.parse(fs.readFileSync(0,'utf8')),browser=await chromium.launch({headless:true,channel:'msedge'});
  try{
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
-  const url=pathToFileURL(path.join(project,'output_file/鸿蒙智行销量预测.html'));
+  const url=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
   url.search=new URLSearchParams({subject:'问界 M9 2026款',module:'sales_forecast'});
   await page.goto(url.href);await page.waitForSelector('.forecast-workspace');
   await page.addScriptTag({path:path.resolve('templates/forecast-import.js')});

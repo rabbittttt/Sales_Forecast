@@ -36,7 +36,7 @@ const {chromium}=require(path.join(project,'.test_runtime/node_modules/playwrigh
    };
   });
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
-  const url=pathToFileURL(path.join(project,'output_file/鸿蒙智行销量预测.html'));
+  const url=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
   url.search=new URLSearchParams({module:'sales_forecast',subject:'问界 M9 2026款',forecastStage:'launch',forecastView:'result'});
   await page.goto(url.href);await page.waitForFunction(()=>document.querySelector('.forecast-workspace')?._forecastComparison);
   const result=await page.locator('.forecast-workspace').evaluate(root=>root._forecastComparison);

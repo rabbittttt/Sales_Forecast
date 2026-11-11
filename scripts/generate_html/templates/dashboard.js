@@ -281,6 +281,10 @@
   function loadForecastState(){
     try{
       let raw=localStorage.getItem(forecastStorageKey),migrated=false;
+      if(raw===null&&FORECAST_APP&&location.protocol==='file:'&&location.pathname.includes('/output_file/static/')){
+        const oldPath=location.pathname.replace('/output_file/static/','/output_file/');
+        raw=localStorage.getItem('sales-forecast-independent-v1:'+oldPath);migrated=raw!==null;
+      }
       if(raw===null&&FORECAST_APP&&DATA.forecast_legacy_page){
         const oldPath=new URL(DATA.forecast_legacy_page,location.href).pathname;
         raw=localStorage.getItem('harmony-forecast-v1:'+oldPath);migrated=raw!==null;
