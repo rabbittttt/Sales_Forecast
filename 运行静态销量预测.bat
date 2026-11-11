@@ -3,7 +3,7 @@ setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul
 title 静态销量预测
 cd /d "%~dp0"
-for %%I in ("%~dp0..") do set "projectRoot=%%~fI"
+for %%I in ("%~dp0.") do set "projectRoot=%%~fI"
 cd /d "%projectRoot%"
 
 rem Explicit paths are resolved from this project, never from the caller's cwd.
@@ -41,7 +41,7 @@ echo Python: "%forecastPython%"
 "%forecastPython%" -c "import importlib.util, sys; sys.exit(1 if sys.version_info < (3, 10) or any(importlib.util.find_spec(n) is None for n in ('openpyxl',)) else 0)" >nul 2>nul
 if errorlevel 1 goto missing_dependencies
 
-"%forecastPython%" "%projectRoot%\静态网页\main.py" %*
+"%forecastPython%" "%projectRoot%\static\main.py" %*
 set "launcherExitCode=%errorlevel%"
 if not "%launcherExitCode%"=="0" pause
 exit /b %launcherExitCode%

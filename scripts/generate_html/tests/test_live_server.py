@@ -519,7 +519,7 @@ current.verifyRequests();
         self.run_client("""
 const current = client(reply('published'));
 await flush();
-assert.equal(current.interval,10000);
+assert.equal(current.interval,60000);
 for (const revision of ['published','',null]) {
   current.queue.push(reply(revision));
   await current.poll();

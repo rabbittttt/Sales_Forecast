@@ -10,20 +10,21 @@
 
 ```text
 销量预测/
-├─ 静态网页/
-│  ├─ main.py
-│  └─ 运行静态销量预测.bat
-├─ 动态网页/
-│  ├─ serve.py
-│  └─ 运行动态销量预测.bat
+├─ 运行静态销量预测.bat
+├─ 运行动态销量预测.bat
+├─ 运行销量预测.bat                （兼容旧静态启动方式）
+├─ static/
+│  └─ main.py
+├─ dynamic/
+│  └─ serve.py
 ├─ output_file/
 │  ├─ static/
 │  │  ├─ 鸿蒙智行销量预测.html
 │  │  └─ log/
 │  └─ dynamic/
 │     └─ log/
-├─ main.py、运行销量预测.bat          （兼容静态入口）
-└─ serve.py、运行动态销量预测.bat    （兼容动态入口）
+├─ main.py                        （兼容静态入口）
+└─ serve.py                       （兼容动态入口）
 ```
 
 所有项目默认共用所在 `Project/.venv`。新电脑先安装 Python 3.11 或更新版本（共享环境要求），在 `Project` 根目录双击“初始化共享环境.cmd”重建共享环境并安装依赖。也可在本项目根目录手动安装：
@@ -38,30 +39,30 @@
 
 ### 静态网页
 
-双击 `静态网页/运行静态销量预测.bat`，生成并打开 `output_file/static/鸿蒙智行销量预测.html`。生成后可直接打开该 HTML，无需保持启动窗口运行，下次手动运行时更新数据。日志位于 `output_file/static/log/`。
+双击根目录的 `运行静态销量预测.bat`，生成并打开 `output_file/static/鸿蒙智行销量预测.html`。生成后可直接打开该 HTML，无需保持启动窗口运行，下次手动运行时更新数据。日志位于 `output_file/static/log/`。
 
 在项目根目录运行命令，只生成文件、不打开浏览器：
 
 ```powershell
-..\.venv\Scripts\python.exe 静态网页/main.py --no-open
+..\.venv\Scripts\python.exe static/main.py --no-open
 ```
 
 ### 动态网页
 
-双击 `动态网页/运行动态销量预测.bat`，启动本地服务并打开浏览器，默认地址为 `http://127.0.0.1:8780/`。动态结果位于 `output_file/dynamic/`，日志位于 `output_file/dynamic/log/`。
+双击根目录的 `运行动态销量预测.bat`，启动本地服务并打开浏览器，默认地址为 `http://127.0.0.1:8780/`。动态结果位于 `output_file/dynamic/`，日志位于 `output_file/dynamic/log/`。
 
-服务每 300 秒检查共享原始输入，发现变化后，等待文件连续稳定 60 秒再更新预测。更新完成后，浏览器自动刷新。首次启动也会等待连续稳定 60 秒，期间可查看已有结果。更新失败时保留上次成功页面并自动重试。使用期间保持服务窗口打开，按 `Ctrl+C` 停止服务。
+后台服务每 300 秒检查共享原始输入，发现变化后，等待文件连续稳定 60 秒再更新预测。浏览器每 60 秒检查页面版本，发现新版本后自动刷新。首次启动也会等待连续稳定 60 秒，期间可查看已有结果。更新失败时保留上次成功页面并自动重试。使用期间保持服务窗口打开，按 `Ctrl+C` 停止服务。
 
 在项目根目录手动启动：
 
 ```powershell
-..\.venv\Scripts\python.exe 动态网页/serve.py
-..\.venv\Scripts\python.exe 动态网页/serve.py --host 127.0.0.1 --port 8780 --no-open
+..\.venv\Scripts\python.exe dynamic/serve.py
+..\.venv\Scripts\python.exe dynamic/serve.py --host 127.0.0.1 --port 8780 --no-open
 ```
 
 `--no-open` 只关闭自动打开浏览器。动态地址与直接打开静态文件的浏览器人工参数各自保存。
 
-根目录原有 `main.py`、`serve.py` 和两个启动脚本保留兼容，分别转到对应入口，命令行参数继续有效。启动位置不影响默认输入、输出路径。
+所有启动 bat 均放在项目根目录，`运行销量预测.bat` 转发到 `运行静态销量预测.bat`，兼容旧调用。根目录原有 `main.py`、`serve.py` 也保留兼容入口，命令行参数继续有效。启动位置不影响默认输入、输出路径。
 
 ## 输入与输出
 

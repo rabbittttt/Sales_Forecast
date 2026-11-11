@@ -19,7 +19,7 @@
       checking = false;
     }
   }
-  setInterval(checkForUpdate, 10000);
+  setInterval(checkForUpdate, 60000);
   document.addEventListener("visibilitychange", checkForUpdate);
   checkForUpdate();
 })();
