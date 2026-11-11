@@ -7,6 +7,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -17,9 +18,10 @@ import webbrowser
 
 from core.data_paths import (
     PROJECT_ROOT, assert_output_is_private, orders_input_directory,
-    dynamic_output_directory, static_output_directory,
+    dynamic_output_directory,
 )
-from core.live_server import ForecastServer, LiveMonitor, scan_inputs
+from core.live_server import ForecastServer, LiveMonitor, scan_inputs, normalize_prefix
+from core.release import runtime_revision
 from core.renderer import FORECAST_PAGE_NAME
 
 
@@ -52,32 +54,43 @@ def parse_args():
     parser.add_argument("--port", type=int, default=8780)
     parser.add_argument("--input", type=Path, default=orders_input_directory(PROJECT_ROOT))
     parser.add_argument("--no-open", action="store_true")
+    parser.add_argument("--data-dir", type=Path, help="外置运行目录；相对路径按项目根解析")
+    parser.add_argument("--public-prefix", type=normalize_prefix,
+                        default=os.environ.get("SALES_FORECAST_PUBLIC_PREFIX", "/"))
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.data_dir is not None:
+        os.environ["SALES_FORECAST_DATA_DIR"] = str(args.data_dir)
     output_root = dynamic_output_directory(PROJECT_ROOT)
+    if (PROJECT_ROOT.parent / "app-release.json").is_file():
+        if not os.environ.get("SALES_FORECAST_DATA_DIR", "").strip() or output_root.is_relative_to(PROJECT_ROOT):
+            raise ValueError("发布运行必须通过 --data-dir 或 SALES_FORECAST_DATA_DIR 指定版本目录外的运行根")
+        if not os.environ.get("SHARED_DATA_ROOT", "").strip():
+            raise ValueError("发布运行必须显式配置 SHARED_DATA_ROOT")
     log_dir = output_root / "log"
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s",
                         handlers=[logging.StreamHandler(),
                                   logging.FileHandler(log_dir / "live_server.log", encoding="utf-8")])
     input_dir = args.input.resolve()
-    instance_id = hashlib.sha256(f"{PROJECT_ROOT}|{input_dir}|{orders_input_directory(PROJECT_ROOT).resolve()}".encode("utf-8")).hexdigest()
-    live_dir = assert_output_is_private(output_root / instance_id[:12])
+    source_key = hashlib.sha256(f"{input_dir}|{orders_input_directory(PROJECT_ROOT).resolve()}".encode("utf-8")).hexdigest()[:16]
+    revision = runtime_revision(PROJECT_ROOT)
+    # External caches survive restart, but a new program version never serves old templates.
+    live_dir = assert_output_is_private(output_root / source_key / revision)
+    instance_id = hashlib.sha256(f"{PROJECT_ROOT}|{live_dir}|{args.public_prefix}".encode("utf-8")).hexdigest()
     monitor = LiveMonitor(lambda: scan_inputs(input_dir),
                           lambda: build_page(input_dir, live_dir),
                           output_file=live_dir / FORECAST_PAGE_NAME)
     previous_pages = [live_dir / FORECAST_PAGE_NAME]
-    if input_dir == orders_input_directory(PROJECT_ROOT).resolve():
-        previous_pages.append(static_output_directory(PROJECT_ROOT) / FORECAST_PAGE_NAME)
     for previous in previous_pages:
         if previous.is_file():
             monitor.seed(previous.read_bytes())
             break
     try:
-        server = ForecastServer((args.host, args.port), monitor, live_dir / "forecast_assets", instance_id)
+        server = ForecastServer((args.host, args.port), monitor, live_dir / "forecast_assets", instance_id, args.public_prefix)
     except OSError:
         # Reopening the launcher should open the existing local service.
         existing = f"http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{args.port}"
@@ -96,6 +109,8 @@ def main() -> int:
         return 1
     address = "127.0.0.1" if args.host == "0.0.0.0" else args.host
     url = f"http://{address}:{server.server_address[1]}"
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
     stop = threading.Event()
     worker = threading.Thread(target=monitor.run, args=(stop,), name="forecast-monitor", daemon=True)
     worker.start()

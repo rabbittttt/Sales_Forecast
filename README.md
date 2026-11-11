@@ -64,6 +64,24 @@
 
 所有启动 bat 均放在项目根目录，`运行销量预测.bat` 转发到 `运行静态销量预测.bat`，兼容旧调用。根目录原有 `main.py`、`serve.py` 也保留兼容入口，命令行参数继续有效。启动位置不影响默认输入、输出路径。
 
+## 门户接入与发布
+
+门户仍访问 `/forecast/`，独立运行仍访问 `/`。原项目启动示例：
+
+```powershell
+..\.venv\Scripts\python.exe -B dynamic/serve.py --no-open --public-prefix /forecast/
+..\.venv\Scripts\python.exe -B scripts/build_release.py --version 2026.11.11.1 --destination output_file/releases/forecast-2026.11.11.1
+```
+
+标准包只有 `app-release.json` 和 `payload/`，包含同版代码、模板、资源与 requirements.txt，不带 Excel、日志、缓存或浏览器草稿。发布目录不可覆盖，前后端一起切换。部署电脑安装依赖后运行包内 `dynamic/serve.py`：
+
+- `--host 127.0.0.1 --port 8780 --no-open --public-prefix /forecast/`；代理整段前缀，支持剥除或保留前缀，页面可同源嵌入。
+- `--data-dir` 或 `SALES_FORECAST_DATA_DIR` 指定版本目录外的运行根；相对值按项目（发布时为 payload）根解析，正式部署传绝对路径。页面、资源、锁、缓存和日志全部写入该目录，不能放共享原始输入目录。未配置时沿用原 output_file。
+- `SHARED_DATA_ROOT` 显式指向部署电脑的共享根。保留原预测规则：只读原始输入，仅更新订单汇总中的销量汇总派生文件。账号须能写入该派生文件。
+- `/healthz` 为轻量进程探针，返回 ok/app/ready/state；`/readyz` 在首次等待或更新错误时返回 503；`/api/status` 给出更新状态。首次页面返回等待壳并自动重试，生成失败可查状态和服务日志。
+
+同一版本重启可读取外置目录中的上次结果；源码、模板或配置变更后不会复用旧版本页面，重新等待输入稳定并生成。发布前停掉旧服务，再切换版本；不要让新旧服务同时写共享汇总。浏览器人工参数仍由原页面维护，门户公共地址不变时继续沿用。
+
 ## 输入与输出
 
 - 输入：相对于本项目根目录的 `../共享数据/订单汇总/`，其中“小订及首销数据整理.xlsx”为维护表，其余订单 Excel 为真实订单来源。

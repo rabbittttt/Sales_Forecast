@@ -410,8 +410,11 @@ class ForecastHTTPTests(TestCase):
         self.assertEqual(pages[0], pages[1])
         self.build.assert_not_called()
 
-    def test_unbuilt_page_is_unavailable_while_status_api_still_works(self):
-        self.assertEqual(self.get("/")[0], 503)
+    def test_unbuilt_page_waits_while_readiness_distinguishes_missing_data(self):
+        self.assertEqual(self.get("/")[0], 200)
+        self.assertEqual(self.get("/healthz")[0], 200)
+        self.assertFalse(json.loads(self.get("/healthz")[2])["ready"])
+        self.assertEqual(self.get("/readyz")[0], 503)
         status, headers, body = self.get("/api/status")
         self.assertEqual(status, 200)
         self.assertIn("application/json", headers.get("Content-Type", ""))
@@ -448,6 +451,42 @@ class ForecastHTTPTests(TestCase):
         self.assertTrue(body.strip())
         self.build.assert_not_called()
 
+    def test_public_prefix_keeps_script_status_assets_and_head_scoped(self):
+        self.server.public_prefix = "/forecast/"
+        self.monitor.seed(b"<html><body>published</body></html>")
+        for target in ("/", "/forecast/"):
+            status, headers, body = self.get(target)
+            self.assertEqual(status, 200)
+            self.assertIn(b'src="/forecast/__forecast_live.js"', body)
+            self.assertEqual(headers["X-Frame-Options"], "SAMEORIGIN")
+        self.assertEqual(self.get("/forecast/__forecast_live.js")[0], 200)
+        self.assertEqual(json.loads(self.get("/forecast/api/status")[2])["revision"], self.monitor.page()[1])
+        self.assertEqual(self.get("/forecast/readyz")[0], 200)
+        self.monitor._set_state("error", "fixture failure")
+        self.assertEqual(self.get("/forecast/healthz")[0], 200)
+        self.assertEqual(self.get("/forecast/readyz")[0], 503)
+        self.assertNotIn(b"fixture failure", self.get("/forecast/healthz")[2])
+        self.assertEqual(self.get("/forecast?x=1")[:2][0], 308)
+        self.assertEqual(self.get("/forecast?x=1")[1]["Location"], "/forecast/?x=1")
+        self.assertEqual(self.get("/another/api/status")[0], 404)
+        connection = http.client.HTTPConnection(*self.server.server_address, timeout=3)
+        try:
+            connection.request("HEAD", "/forecast/healthz")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.read(), b"")
+        finally:
+            connection.close()
+        with TemporaryDirectory() as folder:
+            self.server.asset_dir = Path(folder)
+            asset = "raw-" + "a" * 64 + ".js"
+            (Path(folder) / asset).write_bytes(b"fixture asset")
+            self.assertEqual(self.get("/forecast/forecast_assets/" + asset)[2], b"fixture asset")
+            self.assertEqual(self.get("/forecast/forecast_assets/../secret.json")[0], 404)
+        for prefix in ('//evil/', '/forecast/../', '/x?y', '/x"bad', 'forecast'):
+            with self.assertRaises(ValueError):
+                live_server.normalize_prefix(prefix)
+
     def test_unlisted_files_and_traversal_paths_are_not_served(self):
         self.monitor.seed(b"<html>page</html>")
         for target in ("/config.json", "/orders.xlsx", "/.git/config",
@@ -468,11 +507,11 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 const reply = (revision, ok=true) => ({ok, json:async () => ({revision})});
 function client(initial, hidden=false) {
   const queue = [initial], requests = [], handlers = new Map();
-  const document = {hidden, currentScript:{dataset:{revision:'published'}},
+  const document = {hidden, currentScript:{src:'https://portal.test/forecast/__forecast_live.js',dataset:{revision:'published'}},
     addEventListener:(name, callback) => handlers.set(name, callback)};
   let poll, interval, reloads=0, unexpected=0;
   vm.runInNewContext(source, {
-    document,
+    document, URL,
     location:{reload:() => {reloads += 1}},
     setInterval:(callback, milliseconds) => {poll=callback;interval=milliseconds;return 1},
     fetch:async (url, options) => {
@@ -490,7 +529,7 @@ function client(initial, hidden=false) {
     verifyRequests() {
       assert.equal(unexpected,0);
       for (const request of requests) {
-        assert.equal(request.url,'/api/status');
+        assert.equal(request.url,'https://portal.test/forecast/api/status');
         assert.equal(request.options.cache,'no-store');
       }
     }

@@ -1,12 +1,13 @@
 (() => {
   "use strict";
   const revision = document.currentScript.dataset.revision;
+  const statusUrl = new URL("api/status", document.currentScript.src).href;
   let checking = false;
   async function checkForUpdate() {
     if (checking || document.hidden) return;
     checking = true;
     try {
-      const response = await fetch("/api/status", {cache: "no-store"});
+      const response = await fetch(statusUrl, {cache: "no-store"});
       if (!response.ok) return;
       const status = await response.json();
       if (status.revision && status.revision !== revision) {

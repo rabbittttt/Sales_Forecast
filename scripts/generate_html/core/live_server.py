@@ -154,11 +154,20 @@ class LiveMonitor:
             stop.wait(5)
 
 
+def normalize_prefix(value: str) -> str:
+    if value in ("", "/"):
+        return "/"
+    if not re.fullmatch(r"/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+/?", value):
+        raise ValueError("公共前缀须为 /forecast/ 这样的本地路径")
+    return value.rstrip("/") + "/"
+
+
 class ForecastServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
 
-    def __init__(self, address, monitor: LiveMonitor, asset_dir: Path | None = None, instance_id=""):
+    def __init__(self, address, monitor: LiveMonitor, asset_dir: Path | None = None, instance_id="", public_prefix="/"):
+        self.public_prefix = normalize_prefix(public_prefix)
         self.monitor = monitor
         self.instance_id = instance_id
         self.asset_dir = asset_dir
@@ -178,13 +187,34 @@ class ForecastHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'self'")
         self.end_headers()
         if not head:
             self.wfile.write(content)
 
     def _respond(self, head=False):
         path = unquote(urlsplit(self.path).path)
-        if path == "/api/status":
+        prefix = self.server.public_prefix
+        # Accept both an intact public prefix and a prefix-stripping reverse proxy.
+        if prefix != "/" and path == prefix.rstrip("/"):
+            self.send_response(308)
+            query = urlsplit(self.path).query
+            self.send_header("Location", prefix + ("?" + query if query else ""))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if prefix != "/" and path.startswith(prefix):
+            path = "/" + path[len(prefix):]
+        if path in ("/healthz", "/readyz"):
+            state = self.server.monitor.status()
+            ready = bool(state["revision"])
+            healthy = ready and state["state"] != "error"
+            data = json.dumps({"ok": True, "app": "sales-forecast-live",
+                               "ready": ready, "state": state["state"], "public_prefix": prefix}).encode("utf-8")
+            self._send(data, "application/json; charset=utf-8",
+                       status=200 if path == "/healthz" or healthy else 503, head=head)
+        elif path == "/api/status":
             data = json.dumps({**self.server.monitor.status(), "instance": self.server.instance_id},
                               ensure_ascii=False).encode("utf-8")
             self._send(data, "application/json; charset=utf-8", head=head)
@@ -195,9 +225,9 @@ class ForecastHandler(BaseHTTPRequestHandler):
             if content is None:
                 waiting = ('<!doctype html><meta charset="utf-8"><title>销量预测</title>'
                            '<script>setTimeout(()=>location.reload(),5000)</script>').encode("utf-8")
-                self._send(waiting, "text/html; charset=utf-8", status=503, head=head)
+                self._send(waiting, "text/html; charset=utf-8", status=200, head=head)
                 return
-            client = (f'<script src="/__forecast_live.js" data-revision="{revision}" defer></script>'
+            client = (f'<script src="{prefix}__forecast_live.js" data-revision="{revision}" defer></script>'
                       ).encode("utf-8")
             content = content.replace(b"</body>", client + b"</body>") if b"</body>" in content else content + client
             self._send(content, "text/html; charset=utf-8", head=head)

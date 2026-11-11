@@ -65,7 +65,10 @@ def assert_summary_output(path: Path, project_root: Path = PROJECT_ROOT) -> Path
 
 
 def project_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
-    return assert_output_is_private(Path(project_root) / "output_file", project_root)
+    configured = os.environ.get("SALES_FORECAST_DATA_DIR", "").strip()
+    candidate = Path(configured).expanduser() if configured else Path("output_file")
+    output = candidate if candidate.is_absolute() else Path(project_root) / candidate
+    return assert_output_is_private(output, project_root)
 
 
 def static_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
