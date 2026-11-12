@@ -94,17 +94,26 @@ def main() -> int:
     except OSError:
         # Reopening the launcher should open the existing local service.
         existing = f"http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{args.port}"
+        status = {}
         try:
             with urlopen(existing + "/api/status", timeout=2) as response:
-                status = json.load(response)
-                same_app = status.get("app") == "sales-forecast-live" and status.get("instance") == instance_id
+                response_status = json.load(response)
+                if isinstance(response_status, dict):
+                    status = response_status
         except (OSError, URLError, ValueError):
-            same_app = False
-        if same_app:
-            LOGGER.info("动态服务已运行：%s", existing)
-            if not args.no_open:
-                webbrowser.open(existing)
-            return 0
+            pass
+        if status.get("app") == "sales-forecast-live":
+            if status.get("instance") == instance_id:
+                LOGGER.info("动态服务已运行：%s", existing)
+                if not args.no_open:
+                    webbrowser.open(existing)
+                return 0
+            LOGGER.error(
+                "端口 %s 已有销量预测服务运行，但版本或运行配置不同。"
+                "先在旧服务窗口按 Ctrl+C 正常退出，再启动当前版本。",
+                args.port,
+            )
+            return 1
         LOGGER.exception("无法启动服务，请检查地址或端口 %s", args.port)
         return 1
     address = "127.0.0.1" if args.host == "0.0.0.0" else args.host

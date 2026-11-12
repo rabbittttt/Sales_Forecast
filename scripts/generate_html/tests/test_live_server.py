@@ -2,18 +2,22 @@
 from __future__ import annotations
 
 import dataclasses
+from contextlib import ExitStack
 from datetime import date
 import http.client
+import io
 import json
 import os
 import shutil
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import threading
 from unittest import TestCase, skipUnless
 from unittest.mock import MagicMock, Mock, patch
 from urllib.parse import quote
+from urllib.error import URLError
 
 from core import live_server
 from core.data_paths import FORECAST_SUMMARY_NAME
@@ -627,3 +631,88 @@ class ForcedSummaryRefreshTests(TestCase):
                     self.assertEqual(command.count("--force"), int(force))
                     self.assertEqual(command[command.index("--orders") + 1], str((root / "inputs").resolve()))
                     self.assertEqual(command[command.index("--output") + 1], str(summary.resolve()))
+
+
+class StartupReuseTests(TestCase):
+    def conflict(self, existing, *, no_open=False):
+        import server as entry
+
+        with TemporaryDirectory() as directory, ExitStack() as stack:
+            root = Path(directory)
+            args = SimpleNamespace(host="0.0.0.0", port=8780, input=root / "orders",
+                                   no_open=no_open, data_dir=None, public_prefix="/")
+            stack.enter_context(patch.object(entry, "PROJECT_ROOT", root / "project"))
+            stack.enter_context(patch.object(entry, "parse_args", return_value=args))
+            stack.enter_context(patch.object(entry, "runtime_revision", return_value="new-runtime"))
+            stack.enter_context(patch.object(entry, "dynamic_output_directory", return_value=root / "dynamic"))
+            stack.enter_context(patch.object(entry, "orders_input_directory", return_value=root / "shared-orders"))
+            stack.enter_context(patch.object(entry, "LiveMonitor"))
+            stack.enter_context(patch.object(entry.logging, "basicConfig"))
+            stack.enter_context(patch.object(entry.logging, "FileHandler"))
+            constructor = stack.enter_context(patch.object(entry, "ForecastServer", side_effect=OSError("address in use")))
+            browser = stack.enter_context(patch.object(entry.webbrowser, "open"))
+            threads = stack.enter_context(patch.object(entry.threading, "Thread"))
+            processes = stack.enter_context(patch.object(entry.subprocess, "run"))
+            kill = stack.enter_context(patch.object(entry.os, "kill"))
+
+            def probe(*unused_args, **unused_kwargs):
+                if isinstance(existing, Exception):
+                    raise existing
+                if existing == "invalid-json":
+                    return io.BytesIO(b"not status JSON")
+                # Ask the actual startup call for its computed identity; never
+                # duplicate the production hash or its configuration inputs.
+                instance = constructor.call_args.args[3]
+                status = {"app": "sales-forecast-live", "instance": instance}
+                if existing == "different-instance":
+                    status["instance"] = instance + "-other-version-or-config"
+                elif existing == "other-app":
+                    status["app"] = "another-local-service"
+                return io.BytesIO(json.dumps(status).encode("utf-8"))
+
+            lookup = stack.enter_context(patch.object(entry, "urlopen", side_effect=probe))
+            with self.assertLogs(entry.LOGGER, level="INFO") as captured:
+                result = entry.main()
+            constructor.assert_called_once()
+            lookup.assert_called_once_with("http://127.0.0.1:8780/api/status", timeout=2)
+            threads.assert_not_called()
+            processes.assert_not_called()
+            kill.assert_not_called()
+            if existing == "same-instance" and not no_open:
+                browser.assert_called_once_with("http://127.0.0.1:8780")
+            else:
+                browser.assert_not_called()
+            return result, captured.records
+
+    def test_same_app_and_instance_reuses_existing_service(self):
+        for no_open in (False, True):
+            with self.subTest(no_open=no_open):
+                result, records = self.conflict("same-instance", no_open=no_open)
+                self.assertEqual(result, 0)
+                self.assertFalse(any(record.levelname == "ERROR" for record in records))
+
+    def test_same_app_with_other_instance_requires_stopping_the_old_window(self):
+        result, records = self.conflict("different-instance")
+        self.assertEqual(result, 1)
+        errors = "\n".join(record.getMessage() for record in records if record.levelname == "ERROR")
+        self.assertIn("版本或运行配置不同", errors)
+        self.assertIn("Ctrl+C", errors)
+        self.assertIn("窗口", errors)
+
+    def test_other_application_is_not_reused_even_with_matching_instance(self):
+        result, records = self.conflict("other-app")
+        self.assertEqual(result, 1)
+        errors = "\n".join(record.getMessage() for record in records if record.levelname == "ERROR")
+        self.assertIn("端口", errors)
+        self.assertIn("8780", errors)
+        self.assertNotIn("版本或运行配置不同", errors)
+
+    def test_failed_status_probe_keeps_the_original_port_error(self):
+        for failure in (URLError("service cannot be probed"), "invalid-json"):
+            with self.subTest(failure=str(failure)):
+                result, records = self.conflict(failure)
+                self.assertEqual(result, 1)
+                errors = "\n".join(record.getMessage() for record in records if record.levelname == "ERROR")
+                self.assertIn("端口", errors)
+                self.assertIn("8780", errors)
+                self.assertNotIn("版本或运行配置不同", errors)
