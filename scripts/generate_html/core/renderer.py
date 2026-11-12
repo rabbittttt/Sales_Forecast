@@ -130,9 +130,8 @@ def render_dashboard(manifest: dict[str, Any], template_dir: Path, output_file: 
     forecast_math = (template_dir / "forecast-math.js").read_text(encoding="utf-8")
     forecast_import = (template_dir / "forecast-import.js").read_text(encoding="utf-8")
     javascript = f"{forecast_import}\n{forecast_math}\n{(template_dir / 'dashboard.js').read_text(encoding='utf-8')}"
-    logo_path = template_dir / "brand-logo.png"
-    logo_data = base64.b64encode(logo_path.read_bytes()).decode("ascii")
-    favicon_data = base64.b64encode((template_dir / "forecast-icon.svg").read_bytes()).decode("ascii")
+    icon_data = base64.b64encode((template_dir / "forecast-icon.svg").read_bytes()).decode("ascii")
+    icon_url = f"data:image/svg+xml;base64,{icon_data}"
     # 主数据(主体/配置/底表元信息)整体压缩;看板按主体|模块分块压缩、底表行数据按表分块压缩,前端按需解压
     raw_blocks = manifest.get("raw_blocks", {})
     dashboard_blocks, sizes = {}, {}
@@ -173,8 +172,8 @@ def render_dashboard(manifest: dict[str, Any], template_dir: Path, output_file: 
     html = html.replace("__DASHBOARD_RAW__", raw_payload)
     html = html.replace("__DASHBOARD_BLOCKS__", board_payload)
     html = html.replace("__DASHBOARD_JS__", javascript)
-    html = html.replace("__BRAND_LOGO__", f"data:image/png;base64,{logo_data}")
-    html = html.replace("__FAVICON__", f"data:image/svg+xml;base64,{favicon_data}")
+    html = html.replace("__BRAND_LOGO__", icon_url)
+    html = html.replace("__FAVICON__", icon_url)
     # Write on the same volume, and close before replacing (Windows). A disk
     # write/replace failure must not truncate the previous usable dashboard.
     _write_text_atomic(output_file, html)

@@ -78,6 +78,13 @@ class StandaloneForecastTests(TestCase):
             output = root / FORECAST_PAGE_NAME
             forecast = forecast_manifest(original)
             render_dashboard(forecast, generator.ROOT / "templates", output)
+            html = output.read_text(encoding="utf-8")
+            expected_icon = "data:image/svg+xml;base64," + base64.b64encode(
+                (generator.ROOT / "templates" / "forecast-icon.svg").read_bytes()).decode("ascii")
+            header_icon = re.search(r'class="brand-mark" src="([^"]+)"', html)[1]
+            tab_icon = re.search(r'<link rel="icon"[^>]+href="([^"]+)"', html)[1]
+            self.assertEqual(header_icon, expected_icon)
+            self.assertEqual(tab_icon, expected_icon)
             meta, boards, raw = embedded(output)
             self.assertEqual(set(boards), {"group|sales_forecast"})
             self.assertEqual(raw, {})
