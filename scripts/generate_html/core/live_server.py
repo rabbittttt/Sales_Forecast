@@ -1,7 +1,7 @@
 """Stable-input monitoring and serving of the latest successful forecast."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -59,13 +59,15 @@ def scan_inputs(input_dir: Path, project_root: Path = PROJECT_ROOT) -> InputSnap
 class LiveMonitor:
     def __init__(self, scan: Callable[[], InputSnapshot], build: Callable[[], bytes],
                  clock=time.monotonic, scan_interval=300, stable_seconds=60,
-                 output_file: Path | None = None):
+                 output_file: Path | None = None, cache_files: tuple[Path, ...] = ()):
         self.scan = scan
         self.build = build
         self.clock = clock
         self.scan_interval = scan_interval
         self.stable_seconds = stable_seconds
         self.output_file = output_file
+        self.cache_files = cache_files
+        self._restored = None
         self._lock = threading.Lock()
         self._tick_lock = threading.Lock()
         self._content = None
@@ -81,6 +83,54 @@ class LiveMonitor:
         with self._lock:
             self._content = content
             self._revision = hashlib.sha256(content).hexdigest()
+
+    @property
+    def checkpoint_file(self) -> Path | None:
+        return self.output_file.with_name(self.output_file.name + ".state.json") if self.output_file else None
+
+    def _cache_artifacts(self) -> list[list]:
+        facts = []
+        for path in self.cache_files:
+            before = path.stat()
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            after = path.stat()
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise OSError(f"快速启动依赖正在变化：{path.name}")
+            facts.append([str(path.resolve()), after.st_size, after.st_mtime_ns, digest])
+        return facts
+
+    def restore(self) -> bool:
+        """Make the last page available; verify its inputs on the worker's first scan."""
+        self._restored = None
+        if self.output_file is None:
+            return False
+        try:
+            content = self.output_file.read_bytes()
+            if not content:
+                return False
+            self.seed(content)
+            saved = json.loads(self.checkpoint_file.read_text(encoding="utf-8"))
+            if saved.get("schema_version") != 1 or saved.get("revision") != self.page()[1]:
+                return False
+            source = saved["snapshot"]
+            snapshot = InputSnapshot(source["day"], tuple(tuple(row) for row in source["files"]))
+            self._restored = (snapshot, saved["artifacts"])
+            return True
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            # Missing checkpoints from older runs do not hide a usable same-version page.
+            return False
+
+    def _save_checkpoint(self, snapshot: InputSnapshot, content: bytes) -> None:
+        if self.checkpoint_file is None:
+            return
+        try:
+            saved = {"schema_version": 1, "snapshot": asdict(snapshot),
+                     "revision": hashlib.sha256(content).hexdigest(),
+                     "artifacts": self._cache_artifacts()}
+            _write_text_atomic(self.checkpoint_file, json.dumps(saved, ensure_ascii=False))
+        except (OSError, ValueError, TypeError):
+            # This optional optimization must not fail an already published report.
+            LOGGER.warning("快速启动缓存保存失败，下次启动将重新检查并生成", exc_info=True)
 
     def page(self) -> tuple[bytes | None, str]:
         with self._lock:
@@ -114,6 +164,15 @@ class LiveMonitor:
             return
         current = self.scan()
         self._next_scan = now + self.scan_interval
+        if self._restored is not None:
+            snapshot, artifacts = self._restored
+            self._restored = None
+            try:
+                if current == snapshot and artifacts == self._cache_artifacts():
+                    self._applied = current
+                    LOGGER.info("输入、业务日期及汇总未变化，已恢复上次预测，无需等待或重新生成")
+            except OSError:
+                LOGGER.info("快速启动依赖不可用，按稳定检查流程重新生成")
         if current == self._applied:
             self._pending = None
             self._set_state("ready")
@@ -141,6 +200,7 @@ class LiveMonitor:
             return
         if self.output_file is not None:
             _write_text_atomic(self.output_file, content.decode("utf-8"))
+            self._save_checkpoint(current, content)
         self.seed(content)
         self._applied = current
         self._pending = None

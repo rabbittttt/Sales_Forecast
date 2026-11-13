@@ -18,7 +18,7 @@ import webbrowser
 
 from core.data_paths import (
     PROJECT_ROOT, assert_output_is_private, orders_input_directory,
-    dynamic_output_directory,
+    dynamic_output_directory, forecast_summary_path,
 )
 from core.live_server import ForecastServer, LiveMonitor, scan_inputs, normalize_prefix
 from core.release import runtime_revision
@@ -83,12 +83,9 @@ def main() -> int:
     instance_id = hashlib.sha256(f"{PROJECT_ROOT}|{live_dir}|{args.public_prefix}".encode("utf-8")).hexdigest()
     monitor = LiveMonitor(lambda: scan_inputs(input_dir),
                           lambda: build_page(input_dir, live_dir),
-                          output_file=live_dir / FORECAST_PAGE_NAME)
-    previous_pages = [live_dir / FORECAST_PAGE_NAME]
-    for previous in previous_pages:
-        if previous.is_file():
-            monitor.seed(previous.read_bytes())
-            break
+                          output_file=live_dir / FORECAST_PAGE_NAME,
+                          cache_files=(forecast_summary_path(PROJECT_ROOT),))
+    monitor.restore()
     try:
         server = ForecastServer((args.host, args.port), monitor, live_dir / "forecast_assets", instance_id, args.public_prefix)
     except OSError:
