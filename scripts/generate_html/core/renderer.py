@@ -11,6 +11,8 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
+from core.discovery import aggregate_subject_aliases
+
 
 FORECAST_PAGE_NAME = "鸿蒙智行销量预测.html"
 
@@ -23,6 +25,7 @@ def forecast_manifest(manifest: dict[str, Any], *, forecast_disabled: bool = Fal
         **manifest,
         "app_mode": "forecast",
         "forecast_disabled": forecast_disabled,
+        "forecast_subject_aliases": aggregate_subject_aliases(),
         "meta": {**manifest.get("meta", {}), "title": "鸿蒙智行销量预测"},
         "config": {**manifest.get("config", {}), "title": "鸿蒙智行销量预测",
                    "module_order": ["sales_forecast"],

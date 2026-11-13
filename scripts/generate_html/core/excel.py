@@ -24,6 +24,7 @@ from openpyxl.styles.numbers import is_date_format
 from openpyxl.utils.cell import get_column_letter, coordinate_to_tuple
 
 from core.data_paths import assert_output_is_private, excel_cache_directory
+from core.model_identity import aggregate_generation_name
 
 
 GRAIN_MAP = {"时": "hour", "天": "day", "周": "week", "月": "month"}
@@ -217,8 +218,8 @@ def sheet_subject(name: str) -> str:
 
 
 def is_aggregate_generation(name: str) -> bool:
-    """以“总计/汇总”结尾的代际是多个代际的聚合视图，品牌级统计时须排除以免重复。"""
-    return clean_text(name).endswith(("总计", "汇总"))
+    """保留旧后缀规则，并识别已明确配置的不带后缀的聚合代际。"""
+    return clean_text(name).endswith(("总计", "汇总")) or aggregate_generation_name(name) is not None
 
 
 def subject_type(name: str) -> str:

@@ -6,7 +6,7 @@ from typing import Iterable
 
 from core.excel import WorkbookStore, clean_text, compact_text, sheet_subject, subject_parent, subject_type
 from core.models import Subject
-from core.model_identity import generation_records, parent_generation
+from core.model_identity import AGGREGATE_GENERATIONS, aggregate_generation_name, generation_records, parent_generation
 
 
 DEFAULT_MODULE_ORDER = [
@@ -21,8 +21,34 @@ BRAND_ORDER = ["问界", "智界", "享界", "尊界", "尚界"]
 
 
 def subject_id(name: str, kind: str) -> str:
-    digest = hashlib.sha1(compact_text(name).encode("utf-8")).hexdigest()[:10]
+    aggregate = aggregate_generation_name(name)
+    # Keep existing browser drafts when a configured aggregate is renamed.
+    identity = AGGREGATE_GENERATIONS[aggregate][0] if aggregate else name
+    digest = hashlib.sha1(compact_text(identity).encode("utf-8")).hexdigest()[:10]
     return f"{kind}_{digest}"
+
+
+def aggregate_subject_aliases() -> dict[str, str]:
+    """Migrate IDs saved before either aggregate naming convention changed."""
+    result = {}
+    for canonical, aliases in AGGREGATE_GENERATIONS.items():
+        names = (canonical, canonical + "汇总", canonical + "总计", *aliases,
+                 *(name.removesuffix("汇总").removesuffix("总计") for name in aliases))
+        current = subject_id(canonical, "generation")
+        for name in names:
+            old = "generation_" + hashlib.sha1(compact_text(name).encode("utf-8")).hexdigest()[:10]
+            if old != current:
+                result[old] = current
+    return result
+
+
+def _subject_key(name: str) -> str:
+    return compact_text(aggregate_generation_name(name) or name)
+
+
+def _prefer_subject_label(current: str | None, candidate: str) -> bool:
+    return (current is None or (" " in candidate and " " not in current)
+            or candidate == aggregate_generation_name(candidate))
 
 
 def is_valid_subject_name(name: str) -> bool:
@@ -45,8 +71,8 @@ def discover_subjects(store: WorkbookStore, forecast_targets: Iterable[str] = ()
         subject = parent_generation(sheet_subject(sheet_name), records)
         if subject and "图表" not in subject and subject not in {"Sheet1", "汇总"} and is_valid_subject_name(subject):
             clean = clean_text(subject)
-            key = compact_text(clean)
-            if key not in names or (" " in clean and " " not in names[key]):
+            key = _subject_key(clean)
+            if _prefer_subject_label(names.get(key), clean):
                 names[key] = clean
     for item in store.items:
         for sheet in item.workbook.worksheets:
@@ -55,8 +81,8 @@ def discover_subjects(store: WorkbookStore, forecast_targets: Iterable[str] = ()
             for row in range(1, sheet.max_row + 1):
                 value = clean_text(parent_generation(sheet.cell(row, 1).value, records))
                 if value and is_valid_subject_name(value):
-                    key = compact_text(value)
-                    if key not in names or (" " in value and " " not in names[key]):
+                    key = _subject_key(value)
+                    if _prefer_subject_label(names.get(key), value):
                         names[key] = value
 
     # Forecast targets can exist before a raw by-day Sheet is available.
@@ -65,13 +91,13 @@ def discover_subjects(store: WorkbookStore, forecast_targets: Iterable[str] = ()
         name = clean_text(parent_generation(value, records))
         if not re.match(r"^[\u4e00-\u9fff]{1,3}界.+", compact_text(name)):
             continue
-        key = compact_text(name)
+        key = _subject_key(name)
         names[key] = name
         target_keys.add(key)
 
     subjects = []
     for name in names.values():
-        kind = "generation" if compact_text(name) in target_keys else subject_type(name)
+        kind = "generation" if _subject_key(name) in target_keys else subject_type(name)
         subjects.append(Subject(subject_id(name, kind), name, kind, subject_parent(name, kind)))
     rank = {"group": 0, "brand": 1, "generation": 2}
 

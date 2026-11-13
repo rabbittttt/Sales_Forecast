@@ -102,6 +102,7 @@
 算法：`scripts/generate_html/modules/sales_forecast.py`。
 刷新汇总：`scripts/generate_html/tools/refresh_sales_forecast_data.py`。
 页面：`scripts/generate_html/templates/`。
+汇总代际的新旧名称对应关系统一维护在 `scripts/generate_html/core/model_identity.py` 的 `AGGREGATE_GENERATIONS`：`问界 M9&M9U 2026款`、`尊界 V680&V800 2026款`、`尚界 Z7&Z7T 2026款`、`享界 S9&S9T 2026款` 不再依赖“汇总”后缀识别。四组旧汇总代号与新名称可以在输入中混用，整理表决定预测显示名称；整理表中明确维护且名称无旧汇总后缀的预测对象继续参与取数，未维护的派生聚合继续排除。同一观察量沿用首个非空值，不重复累加，也不将单个成员车型视为聚合别名。新增组合须显式配置，程序不会仅凭 `&` 推断合并关系。
 所有依赖为实文件副本，没有符号链接或对另一个项目的运行时引用；模块注册只包含销量预测。保留的通用实现和历史业务测试也是本项目自己的副本。
 
 历史功能说明见 `docs/原预测功能说明.md`；其中旧目录、双页构建、订单分析发布和 Git 远端说明已失效。历史迁移验收记录保留当时状态；当前路径、汇总输出约定与运行方式以本文件为准。

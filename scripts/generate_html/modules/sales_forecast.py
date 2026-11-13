@@ -13,7 +13,7 @@ from openpyxl.utils.datetime import from_excel
 
 from core.china_calendar import calendar_payload
 from core.data_paths import forecast_summary_path, forecast_reference_directory, model_information_directory
-from core.model_identity import model_key, usable_attribute, stage_records, stage_name, parent_generation, stage_label, resolve_stage_identity, generation_records, has_reservation, FORECAST_SOURCE_PATH
+from core.model_identity import model_key, model_alias_keys, aggregate_generation_name, usable_attribute, stage_records, stage_name, parent_generation, stage_label, resolve_stage_identity, generation_records, has_reservation, FORECAST_SOURCE_PATH
 from core.excel import cell_source_text, join_source_texts, covered_date_source_text, _source_date_ranges, display_period, grain_from_sheet, is_aggregate_generation, parse_metric_sheet, sheet_subject, subject_type, compact_diagnostic_ranges
 from core.models import Dashboard, SourceRef, Subject
 from core.forecast_summary import ACTIVE_SUMMARY, SUMMARY_NAME, D12_SHEET, LEGACY_D12_SHEET, LAUNCH_CANCEL_SHEET, input_path, open_input, summary_scope, table_records, reservation_reference_shape
@@ -314,7 +314,7 @@ def _maintained_alias_keys(value: Any) -> set[str]:
     variants = {text}
     variants.add(re.sub(r"(?<!\d)(\d{2})\s*款", lambda match: f"20{match.group(1)}款", text))
     variants.add(re.sub(r"(?<!\d)20(\d{2})\s*款", lambda match: f"{match.group(1)}款", text))
-    return {key for item in variants if (key := _model_key(item))}
+    return {key for item in variants for key in model_alias_keys(item) if key}
 
 
 def _canonical_model(value: Any, mapping: dict[str, str] | None = None) -> str:
@@ -323,7 +323,22 @@ def _canonical_model(value: Any, mapping: dict[str, str] | None = None) -> str:
     if not name:
         return ""
     resolved = (mapping if mapping is not None else _read_model_mapping()).get(_model_key(name))
-    return str(resolved or (resolve_stage_identity(name, generation_records()) if not ACTIVE_SUMMARY.get() else None) or name).strip()
+    return str(resolved or (resolve_stage_identity(name, generation_records()) if not ACTIVE_SUMMARY.get() else None)
+               or aggregate_generation_name(name) or name).strip()
+
+
+def _is_aggregate_forecast_model(name: str, mapping: dict[str, str]) -> bool:
+    """Keep explicitly maintained forecast objects eligible after a rename.
+
+    The original reader resolved a maintained name before testing its suffix.
+    A maintained combined vehicle without a summary suffix was therefore a
+    forecast object; renaming it must not discard its real order history.
+    """
+    if aggregate_generation_name(name):
+        maintained = mapping.get(_model_key(name))
+        if maintained and not str(maintained).strip().endswith(("总计", "汇总")):
+            return False
+    return is_aggregate_generation(name)
 
 
 def _same_model(left: Any, right: Any) -> bool:
@@ -415,7 +430,7 @@ def _read_model_mapping_file(mapping_path) -> dict[str, str]:
     active = ACTIVE_SUMMARY.get()
     modern = [] if active and Path(mapping_path) == active["path"] else stage_records(mapping_path)
     if modern:
-        return {model_key(stage_name(r)): stage_name(r) for r in modern}
+        return {key: stage_name(r) for r in modern for key in model_alias_keys(stage_name(r))}
     workbook = open_input(mapping_path, read_only=True, data_only=True)
     try:
         mapping_sheet = next((name for name in ("车型基本信息", "传播名代际映射", "车型代际映射") if name in workbook.sheetnames), "")
@@ -1280,7 +1295,7 @@ def _read_steady_history(
             if grain == 'day' and any(grain_from_sheet(other.title) == 'week' and '图表' not in other.title and _same_model(sheet_subject(other.title), sheet_subject(sheet.title)) for other in sheets):
                 continue
             generation = _canonical_model(sheet_subject(sheet.title), model_mapping)
-            if not generation or subject_type(generation) != "generation" or is_aggregate_generation(generation):
+            if not generation or subject_type(generation) != "generation" or _is_aggregate_forecast_model(generation, model_mapping):
                 continue
             window = _stage_window(stage_windows, generation)
             launch_end = _as_date((window or {}).get("end_date"))
@@ -1955,7 +1970,7 @@ def _read_actual_profiles(store, stage_windows=None, today=None) -> tuple[list[d
             if "图表" in sheet.title or grain_from_sheet(sheet.title) != "day":
                 continue
             model = _canonical_model(sheet_subject(sheet.title), model_mapping)
-            if not model or subject_type(model) != "generation" or is_aggregate_generation(model):
+            if not model or subject_type(model) != "generation" or _is_aggregate_forecast_model(model, model_mapping):
                 continue
             quantity_row = next((
                 row for row in range(2, sheet.max_row + 1)
@@ -2141,7 +2156,7 @@ def _read_actual_profiles(store, stage_windows=None, today=None) -> tuple[list[d
             continue
         for sheet in lock_item.workbook.worksheets:
             model = _canonical_model(sheet_subject(sheet.title), model_mapping)
-            if not model or subject_type(model) != "generation" or is_aggregate_generation(model):
+            if not model or subject_type(model) != "generation" or _is_aggregate_forecast_model(model, model_mapping):
                 continue
             profile_name = next((name for name in profiles if _same_model(name, model)), model)
             if profile_name in profiles:
