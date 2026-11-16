@@ -1,7 +1,7 @@
 // Verify the real main.py output: reference resets, compact scoring and responsive layout.
 const path=require('path'),fs=require('fs'),assert=require('assert'),{pathToFileURL}=require('url');
 const project=path.resolve(__dirname,'../../..');
-const {chromium}=require(path.join(project,'.test_runtime/node_modules/playwright'));
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||path.join(project,'.test_runtime/node_modules/playwright'));
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'msedge'}),errors=[];
  const page=await browser.newPage({viewport:{width:1440,height:1000}});
@@ -17,7 +17,7 @@ const {chromium}=require(path.join(project,'.test_runtime/node_modules/playwrigh
   assert(await page.locator(selector).evaluateAll(nodes=>nodes.every(n=>n.closest('.forecast-field-control')?.querySelector('.forecast-reference-reset')&&n.getAttribute('aria-label'))));
   let checked=0;
   for(const stage of ['small','launch','steady']){
-   await page.locator(`[data-forecast-stage-switch="${stage}"]`).click();await page.locator('[data-forecast-tab="evidence"]').click();await pause();
+   await page.locator(`[data-forecast-nav="${stage}"]`).click();await page.locator('[data-forecast-tab="evidence"]').click();await pause();
    const cards=page.locator('.forecast-ref-card:visible').filter({has:page.locator('[data-forecast-ref],[data-lifecycle-ref]')});
    for(let i=0;i<await cards.count();i++){
     const card=cards.nth(i),weights=card.locator('[data-forecast-ref-weight],[data-lifecycle-weight]'),selects=card.locator('[data-forecast-ref],[data-lifecycle-ref]');
@@ -51,18 +51,28 @@ const {chromium}=require(path.join(project,'.test_runtime/node_modules/playwrigh
   for(const width of [1440,1024,390]){
    await page.setViewportSize({width,height:1000});
    for(const stage of ['small','launch','steady']){
-    await page.locator(`[data-forecast-stage-switch="${stage}"]`).click();
+    await page.locator(`[data-forecast-nav="${stage}"]`).click();
     for(const view of ['result','evidence','score']){
      await page.locator(`[data-forecast-tab="${view}"]`).click();await pause();
      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${stage}/${view}/${width}: page overflow`);
      if(view==='score'){
-      const details=page.locator('.forecast-score-row-details:visible');assert(await details.count()>0);
-      assert.equal(await details.first().getAttribute('open'),null);
-      await details.first().locator('summary').click();assert.notEqual(await details.first().getAttribute('open'),null);
-      await details.first().locator('summary').click();
+      const details=page.locator('.forecast-score-detail-table:visible .forecast-score-row-details');
+      if(stage==='launch'&&await details.count()===0){
+       const tasks=page.locator('[data-forecast-score-task]:visible');
+       for(const value of await tasks.locator('option').evaluateAll(nodes=>nodes.filter(node=>!node.disabled).map(node=>node.value))){
+        await tasks.selectOption(value);await pause();if(await details.count()>0)break;
+       }
+      }
+      assert(await details.count()>0,'At least one scoring task must contain comparable candidates');
+      assert(await details.evaluateAll(nodes=>nodes.every(node=>node.open)),`${stage}/${width}: score details default to expanded`);
+      const reasons=page.locator('.forecast-score-summary-table:visible .forecast-score-row-details');
+      if(stage==='launch')assert(await reasons.count()>0);
+      assert(await reasons.evaluateAll(nodes=>nodes.every(node=>!node.open)),`${stage}/${width}: summary reasons stay collapsed`);
+      await details.first().locator('summary').click();assert.equal(await details.first().getAttribute('open'),null);
       assert(await page.locator('.forecast-score-methodology:visible').count()>0);
       const rowHeight=await page.locator('.forecast-score-detail-table:visible tbody tr').first().evaluate(n=>n.getBoundingClientRect().height);
       assert(rowHeight<(width<700?300:150),`compact ${stage} score row ${rowHeight}px`);
+      await details.first().locator('summary').click();assert.notEqual(await details.first().getAttribute('open'),null);
      }
      if(view==='evidence'){
       assert(await page.locator('.forecast-chart-notes:visible').count()>0);

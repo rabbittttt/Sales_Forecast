@@ -4727,7 +4727,7 @@ body.forecast-app .raw-layout {height:100%;min-height:0}
   body.forecast-app .forecast-workspace.forecast-studio .forecast-target {padding:10px;gap:8px}
   body.forecast-app .forecast-workspace.forecast-studio .forecast-target-heading h3 {font-size:16px}
   body.forecast-app .forecast-workspace.forecast-studio .forecast-target>.forecast-status {max-width:130px;line-height:1.5}
-  body.forecast-app .forecast-workspace.forecast-studio .forecast-target-tabs {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;flex-basis:100%}
+  body.forecast-app .forecast-workspace.forecast-studio .forecast-target-tabs {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;width:100%;flex-basis:100%}
   body.forecast-app .forecast-workspace.forecast-studio .forecast-target-tabs:has([data-forecast-tab="params"][hidden]) {grid-template-columns:repeat(3,minmax(0,1fr))}
   body.forecast-app .forecast-workspace.forecast-studio .forecast-target-tabs button {min-height:42px;width:100%;padding:6px 0;font-size:12px;white-space:normal}
   body.forecast-app .forecast-workspace.forecast-studio .forecast-target-sources {gap:5px 8px}

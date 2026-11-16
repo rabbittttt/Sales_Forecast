@@ -35,14 +35,23 @@ async function run(){
     for(const stage of ['small','steady','launch']){
       await page.locator('[data-forecast-nav="'+stage+'"]').click();
       await page.waitForSelector('[data-forecast-stage-pane="'+stage+'"].active');
-      const views=stage==='launch'?['params','evidence','score','result']:['evidence','score','result'];
-      check(stage+'参数配置仅在有首销方法参数时显示',await page.locator('[data-forecast-tab="params"]').isVisible()===(stage==='launch'));
+      const views=['evidence','score','result'];
+      check(stage+'仅提供结论、依据、打分三个视图',await page.locator('[data-forecast-tab="params"]').count()===0&&JSON.stringify(await page.locator('.forecast-target-tabs [data-forecast-tab]').evaluateAll(nodes=>nodes.map(node=>node.dataset.forecastTab)))===JSON.stringify(['result','evidence','score']));
       for(const view of views){
         await page.locator('[data-forecast-tab="'+view+'"]').click();
         const selector=stage==='launch'?'[data-forecast-pane="'+view+'"].active':'[data-lifecycle-subpane="'+stage+'-'+view+'"].active';
         const pane=page.locator(selector);
         check(stage+' / '+view+'可见',await pane.isVisible());
-        if(view==='evidence')check(stage+'公共参数位于预测依据',await pane.locator('.forecast-common-controls [data-bridge-stage="'+stage+'"]').isVisible());
+        if(view==='evidence'){
+          check(stage+'公共参数位于预测依据',await pane.locator('.forecast-common-controls [data-bridge-stage="'+stage+'"]').isVisible());
+          if(stage==='launch'){
+            check('首销方法参数位于预测依据开头',await pane.evaluate(node=>{
+              const controls=node.querySelector('.forecast-evidence-controls');
+              return !!(node.firstElementChild===controls&&controls.firstElementChild?.matches('.forecast-parameter-rail')&&controls.querySelector('[data-forecast-input="conversion"]')&&controls.querySelector('[data-forecast-input="progressSmallCompletion"]'));
+            }));
+            check('首销方法参数与公共参数均可直接编辑',await pane.locator('[data-forecast-input="conversion"]').isVisible()&&await pane.locator('[data-forecast-input="progressSmallCompletion"]').isVisible()&&await pane.locator('[data-forecast-input="lock"]').isVisible());
+          }
+        }
       }
     }
     const launchDays=page.locator('.forecast-target [data-forecast-target="days"]');
@@ -58,15 +67,17 @@ async function run(){
     check('预测结论页的页头天数输入实时更新首销与平销时间口径',true);
     await launchDays.fill(originalDays);
     await launchDays.press('Tab');
-    // Edit the stage-specific controls in the dedicated params pane.
-    await page.locator('[data-forecast-tab="params"]').click();
+    // Stage-specific and common controls share the evidence pane.
+    await page.locator('[data-forecast-tab="evidence"]').click();
     const conversion=page.locator('[data-forecast-input="conversion"]');
     await conversion.fill('41.2');await conversion.dispatchEvent('change');
     await page.waitForFunction(()=>document.querySelector('[data-forecast-feedback]').dataset.state==='success');
-    await page.locator('[data-forecast-tab="result"]').click();await page.locator('[data-forecast-tab="params"]').click();
+    await page.locator('[data-forecast-tab="result"]').click();await page.locator('[data-forecast-tab="evidence"]').click();
     check('切换视图保留人工参数',await conversion.inputValue()==='41.2');
     await page.reload();await ready(page);
     check('刷新恢复独立看板人工参数',await conversion.inputValue()==='41.2');
+    await page.goto(url(forecastName,{...forecastParams,forecastView:'params'}));await ready(page);await settled(page);
+    check('旧参数配置链接进入预测依据并保留人工参数',new URL(page.url()).searchParams.get('forecastView')==='evidence'&&await page.locator('[data-forecast-tab="evidence"]').getAttribute('aria-selected')==='true'&&await conversion.inputValue()==='41.2');
     await page.locator('[data-forecast-tab="result"]').click();
     const importPanel=page.locator('[data-forecast-import="launch"]');
     if(!await importPanel.locator('.forecast-import-manager').evaluate(node=>node.open))await importPanel.locator('.forecast-import-manager > summary').click();

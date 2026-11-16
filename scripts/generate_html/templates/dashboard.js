@@ -241,7 +241,8 @@
   const stackedTrendPalette=["#FFF2CC","#E2F0D9","#C8E8E8","#A8D8EA","#A0C1E8","#DCC5ED","#F0C8C8","#F8D8B0"];
   const moduleLabels = DATA.config.module_labels;
   const forecastStages=[{id:"small",label:"小订预测"},{id:"launch",label:"首销预测"},{id:"steady",label:"平销预测"}];
-  const forecastViews=FORECAST_APP?["result","params","evidence","score"]:["result","evidence","score"];
+  const forecastViews=["result","evidence","score"];
+  const normalizeForecastView=id=>id==='params'?'evidence':id;
   const state = {subject:null,module:"overview",forecastStage:null,forecastStageAuto:true,forecastView:"result",forecastCampaign:null,grain:"week",period:null,rawFile:0,rawSheet:0,rawQuery:"",rawFreezeRow:true,rawFreezeColumn:false,rawFreezeFirstColumn:true};
   const forecastDrafts=new Map();
   const forecastDraftSelector='[data-forecast-target],[data-forecast-input],[data-forecast-allocation],[data-forecast-ref],[data-forecast-ref-weight],[data-forecast-chart-ref],[data-small-ref],[data-small-weight],[data-small-input],[data-steady-ref],[data-steady-weight],[data-bridge-control],[data-lifecycle-ref],[data-lifecycle-weight],[data-lifecycle-chart-ref]';
@@ -623,7 +624,7 @@
     if(state.module==="launch_rhythm"&&!params.get("grain"))state.grain="day";
     const requestedStage=params.get("forecastStage");state.forecastStageAuto=!forecastStages.some(item=>item.id===requestedStage);if(!state.forecastStageAuto)state.forecastStage=requestedStage;
     state.forecastCampaign=params.get("forecastCampaign")||null;
-    const requestedView=params.get("forecastView");state.forecastView=forecastViews.includes(requestedView)?requestedView:"result";
+    const requestedView=normalizeForecastView(params.get("forecastView"));state.forecastView=forecastViews.includes(requestedView)?requestedView:"result";
     readRawLocation(params);
     try{if(await ensureState()===false)return;await renderAll();if(FORECAST_APP)syncUrl('replace');if(reading&&(!FORECAST_APP||params.get('module')==='sales_forecast')){$('#page').scrollTop=reading.page||0;const table=$('#rawTable');if(table){table.scrollTop=reading.tableTop||0;table.scrollLeft=reading.tableLeft||0;}}}
     finally{restoringReadingPosition=false;}
@@ -639,7 +640,7 @@
     if(state.module==="launch_rhythm"&&!params.get("grain"))state.grain="day";
     if(forecastStages.some(item=>item.id===params.get("forecastStage"))){state.forecastStage=params.get("forecastStage");state.forecastStageAuto=false}
     state.forecastCampaign=params.get("forecastCampaign")||null;
-    if(forecastViews.includes(params.get("forecastView")))state.forecastView=params.get("forecastView");
+    const requestedView=normalizeForecastView(params.get("forecastView"));if(forecastViews.includes(requestedView))state.forecastView=requestedView;
     if(!FORECAST_APP&&DATA.forecast_page&&state.module==='sales_forecast'&&moduleAvailable(subject(),'sales_forecast')){location.replace(forecastPageUrl());return;}
     if(FORECAST_APP){document.title='鸿蒙智行 · 销量预测';$('.brand strong').textContent=document.title;$('#subjectSelect').setAttribute('aria-label','预测车型');}
     $("#updatedAt").textContent=`生成时间 ${DATA.meta.generated_at.replace("T"," ")}`;
@@ -759,12 +760,12 @@
     if(state.forecastStage===id)showForecastStageSummary(root,id);
   }
   function applyForecastView(root,id){
+    id=normalizeForecastView(id);
     if(!root||!forecastViews.includes(id))return;
-    const stage=forecastStages.some(item=>item.id===state.forecastStage)?state.forecastStage:"launch",prefix=stage==="launch"?"forecast":`${stage}-forecast`,hasParameters=!!root.querySelector(`#${prefix}-pane-params`);
-    if(FORECAST_APP&&id==='params'&&!hasParameters)id='evidence';
+    const stage=forecastStages.some(item=>item.id===state.forecastStage)?state.forecastStage:"launch",prefix=stage==="launch"?"forecast":`${stage}-forecast`;
     state.forecastView=id;
     if(FORECAST_APP)document.body.dataset.forecastView=id;
-    root.querySelectorAll('[data-forecast-tab]').forEach(button=>{button.hidden=FORECAST_APP&&button.dataset.forecastTab==='params'&&!hasParameters;const active=!button.hidden&&button.dataset.forecastTab===id;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active));button.setAttribute('aria-controls',`${prefix}-pane-${button.dataset.forecastTab}`);button.tabIndex=active?0:-1});
+    root.querySelectorAll('[data-forecast-tab]').forEach(button=>{const active=button.dataset.forecastTab===id;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active));button.setAttribute('aria-controls',`${prefix}-pane-${button.dataset.forecastTab}`);button.tabIndex=active?0:-1});
     root.querySelectorAll('[data-forecast-pane]').forEach(pane=>pane.classList.toggle('active',pane.dataset.forecastPane===id));
     root.querySelectorAll('[data-lifecycle-subpane]').forEach(pane=>pane.classList.toggle('active',pane.dataset.lifecycleSubpane===`${stage}-${id}`));
     if(stage==='launch'&&id==='score')root._renderLaunchScoreDashboard?.();
@@ -772,17 +773,6 @@
   function prepareForecastStandalone(root){
     if(!root)return;
     root.querySelector('.forecast-source-details').insertAdjacentHTML('beforebegin','<button type="button" class="forecast-source-button" data-workspace-source>来源数据</button>');
-    const evidenceTab=root.querySelector('[data-forecast-tab="evidence"]');
-    evidenceTab.insertAdjacentHTML('beforebegin','<button id="forecast-tab-params" role="tab" aria-selected="false" tabindex="-1" data-forecast-tab="params">参数配置</button>');
-    for(const stage of forecastStages){
-      const scope=root.querySelector(`[data-forecast-stage-pane="${stage.id}"]`),controls=scope?.querySelector('.forecast-evidence-controls'),parameters=controls?.querySelector('.forecast-parameter-rail');if(!parameters)continue;
-      const pane=document.createElement('section'),launch=stage.id==='launch';
-      pane.id=`${launch?'forecast':stage.id+'-forecast'}-pane-params`;pane.setAttribute('aria-labelledby','forecast-tab-params');pane.setAttribute('role','tabpanel');
-      pane.className=`forecast-parameters-pane ${launch?'forecast-pane':'forecast-lifecycle-subpane'}${state.forecastView==='params'?' active':''}`;
-      pane.setAttribute(launch?'data-forecast-pane':'data-lifecycle-subpane',launch?'params':`${stage.id}-params`);
-      const parameterControls=controls.cloneNode(false);parameterControls.append(parameters);
-      controls.parentElement.before(pane);pane.append(parameterControls);
-    }
     const scale=root.querySelector('.forecast-scale-check');
     if(scale){const details=document.createElement('details');details.className='forecast-scale-details';const summary=document.createElement('summary');summary.textContent='总体量级合理性校验';details.append(summary);scale.before(details);details.append(scale);}
   }
@@ -1916,14 +1906,14 @@
   // Adapters select existing fields only; no forecast or aggregation is performed here.
   function renderForecastQuantityChart(rows,{valueKey,labelKey='label',metric='销量',method='parameter',launch=false}={}){
     if(!rows.length)return '<div class="empty-image">暂无可绘制数据</div>';
-    const known=value=>typeof value==='number'&&Number.isFinite(value),values=rows.map(row=>row[valueKey]);
+    const known=value=>typeof value==='number'&&Number.isFinite(value),values=rows.map(row=>row[valueKey]),showDaily=launch&&valueKey!=='daily_gross';
     const spacing=Math.max(42,...values.filter(known).map(value=>fmt(value).length*6.5+16));
     const H=220,left=60,right=launch?50:24,top=26,bottom=42,W=Math.max(560,rows.length*spacing+left+right),plotW=W-left-right,plotH=H-top-bottom,max=Math.max(...values.filter(known),1)*1.12;
     const x=i=>left+(i+.5)*plotW/rows.length,y=value=>top+plotH*(1-value/max),rateY=value=>top+plotH*(1-Math.min(Math.max(value,0),1)),barW=Math.max(6,Math.min(18,plotW/rows.length*.45));
     const stateLabel=row=>row.missing?'数据缺失':row.actual?'真实':row.past_missing?'历史缺失估算':row.partial?'分时滚动':row.current_estimate?'当日估算':'预测',futureColor=method==='progress'?'#0D9488':'#D97706';
     const label=row=>String(row[labelKey]||row.date||''),shortLabel=row=>label(row).split('（')[0];
     const grid=[0,.25,.5,.75,1].map(rate=>{const gy=top+plotH*(1-rate);return `<line x1="${left}" y1="${gy}" x2="${W-right}" y2="${gy}" stroke="#E5EAF0"/><text x="${left-9}" y="${gy+4}" text-anchor="end" font-size="10" fill="#64748B">${fmt(Math.round(max*rate))}</text>${launch?`<text x="${W-right+9}" y="${gy+4}" font-size="10" fill="#64748B">${Math.round(rate*100)}%</text>`:''}`}).join('');
-    const bars=rows.map((row,index)=>{const value=values[index];if(!known(value))return '';const actual=!!row.actual,color=actual?'#3979CB':futureColor;return `<rect x="${x(index)-barW/2}" y="${y(value)}" width="${barW}" height="${Math.max(top+plotH-y(value),0)}" rx="2" fill="${actual?color:'#FFF7ED'}" stroke="${color}" ${actual?'':'stroke-dasharray="4 2"'}><title>${esc(label(row))} ${esc(row.date||'')} · ${stateLabel(row)} · ${esc(metric)} ${fmt(value)}${launch?` · 当日大定 ${fmt(row.daily_gross)}`:''}</title></rect><text data-forecast-quantity-label x="${x(index)}" y="${Math.max(y(value)-7,12)}" text-anchor="middle" font-size="11" fill="#334155" stroke="#fff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">${fmt(value)}</text>`}).join('');
+    const bars=rows.map((row,index)=>{const value=values[index];if(!known(value))return '';const actual=!!row.actual,color=actual?'#3979CB':futureColor;return `<rect x="${x(index)-barW/2}" y="${y(value)}" width="${barW}" height="${Math.max(top+plotH-y(value),0)}" rx="2" fill="${actual?color:'#FFF7ED'}" stroke="${color}" ${actual?'':'stroke-dasharray="4 2"'}><title>${esc(label(row))} ${esc(row.date||'')} · ${stateLabel(row)} · ${esc(metric)} ${fmt(value)}${showDaily?` · 当日大定 ${fmt(row.daily_gross)}`:''}</title></rect><text data-forecast-quantity-label x="${x(index)}" y="${Math.max(y(value)-7,12)}" text-anchor="middle" font-size="11" fill="#334155" stroke="#fff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">${fmt(value)}</text>`}).join('');
     const rateFields=launch?[['small_conversion','累计小转大率','#2563EB'],['direct_share','累计直接大定占比','#BE4B53']]:[];
     const lines=rateFields.map(([field,title,color])=>{
       const segments=actual=>{const result=[];let current=[];rows.forEach((row,i)=>{if(!!row.actual===actual&&known(row[field]))current.push(i);else if(current.length){result.push(current);current=[]}});if(current.length)result.push(current);return result;};
@@ -1933,19 +1923,19 @@
     }).join('');
     const tickStep=Math.max(1,Math.ceil(rows.length/10)),ticks=rows.map((row,i)=>i===0||i===rows.length-1||i%tickStep===0?`<text x="${x(i)}" y="${H-25}" text-anchor="middle" font-size="10" fill="#64748B">${esc(shortLabel(row))}</text><text x="${x(i)}" y="${H-10}" text-anchor="middle" font-size="9" fill="#64748B">${esc(row.day_type_short||'')}</text>`:'').join('');
     const legend=`<div class="legend forecast-chart-legend"><span><i style="background:#3979CB"></i>真实${esc(metric)}</span><span><i class="forecast-outline-key" style="border-color:${futureColor};background:#FFF7ED"></i>估算／预测${esc(metric)}</span>${rateFields.map(([,title,color])=>`<span><i class="line-key" style="border-color:${color}"></i>${title}</span>`).join('')}<span class="forecast-chart-key-note">实心为真实，虚线为估算／预测</span></div>`;
-    const table=`<details class="forecast-ref-score-details forecast-result-values"><summary>查看图表数值</summary><div class="forecast-score-table"><table><thead><tr><th scope="col">周期／日期</th><th scope="col">状态</th><th scope="col">${esc(metric)}（单）</th>${launch?'<th scope="col">当日大定（单）</th>':''}${rateFields.map(([,title])=>`<th scope="col">${title}</th>`).join('')}</tr></thead><tbody>${rows.map((row,i)=>`<tr><th scope="row">${esc(label(row))}${row.date?` · ${esc(row.date)}`:''}</th><td>${stateLabel(row)}</td><td>${known(values[i])?fmt(values[i]):'—'}</td>${launch?`<td>${known(row.daily_gross)?fmt(row.daily_gross):'—'}</td>`:''}${rateFields.map(([field])=>`<td>${known(row[field])?(row[field]*100).toFixed(1)+'%':'—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
+    const table=`<details class="forecast-ref-score-details forecast-result-values"><summary>查看图表数值</summary><div class="forecast-score-table"><table><thead><tr><th scope="col">周期／日期</th><th scope="col">状态</th><th scope="col">${esc(metric)}（单）</th>${showDaily?'<th scope="col">当日大定（单）</th>':''}${rateFields.map(([,title])=>`<th scope="col">${title}</th>`).join('')}</tr></thead><tbody>${rows.map((row,i)=>`<tr><th scope="row">${esc(label(row))}${row.date?` · ${esc(row.date)}`:''}</th><td>${stateLabel(row)}</td><td>${known(values[i])?fmt(values[i]):'—'}</td>${showDaily?`<td>${known(row.daily_gross)?fmt(row.daily_gross):'—'}</td>`:''}${rateFields.map(([field])=>`<td>${known(row[field])?(row[field]*100).toFixed(1)+'%':'—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
     return `<div class="forecast-svg-scroll forecast-result-chart-scroll" style="--forecast-chart-width:${W}px" tabindex="0" role="region" aria-label="${esc(metric)}图表，可横向滚动"><svg class="forecast-decision-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(metric)}实际与预测，实心为真实、虚线为估算或预测">${grid}${bars}${lines}${ticks}</svg></div>${legend}${table}`;
   }
   function renderForecastDecisionChartV2(root,rows,method='parameter'){
     const target=root.querySelector(`[data-forecast-decision-chart="${method}"]`);if(!target)return;
-    target.innerHTML=renderForecastQuantityChart(rows,{valueKey:'cumulative_gross',labelKey:'day',metric:'累计大定',method,launch:true});
+    target.innerHTML=renderForecastQuantityChart(rows,{valueKey:'daily_gross',labelKey:'day',metric:'单日大定',method,launch:true});
   }
 
   function renderForecastWeeklyV2(root,rows,method='parameter'){
     const target=root.querySelector(`[data-forecast-weekly="${method}"]`);if(!target)return;
     const groups=new Map(),weekKey=value=>{const date=value?new Date(`${value}T00:00:00`):null;if(!date||Number.isNaN(date.getTime()))return '';const utc=new Date(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())),day=utc.getUTCDay()||7;utc.setUTCDate(utc.getUTCDate()+4-day);const yearStart=new Date(Date.UTC(utc.getUTCFullYear(),0,1)),week=Math.ceil((((utc-yearStart)/86400000)+1)/7);return `${utc.getUTCFullYear()}W${String(week).padStart(2,'0')}`};
     rows.forEach((row,index)=>{const key=weekKey(row.date)||`第${Math.floor(index/7)+1}周`,group=groups.get(key)||{key,daily:0,end:null,actual:0,forecast:0,backfill:0,missing:0},known=typeof row.daily_gross==='number'&&Number.isFinite(row.daily_gross);if(known){group.daily+=row.daily_gross;if(row.actual)group.actual+=row.daily_gross;else if(row.past_missing)group.backfill+=row.daily_gross;else group.forecast+=row.daily_gross;}else group.missing++;group.end=typeof row.cumulative_gross==='number'&&Number.isFinite(row.cumulative_gross)?row.cumulative_gross:null;groups.set(key,group)});
-    target.innerHTML=[...groups.values()].map(group=>`<article><span>${esc(group.key)}</span><strong>${group.missing?'—':fmt(group.daily)}</strong><small>周大定 · 期末累计${group.end===null?'—':fmt(group.end)}</small><em>${group.missing?`已知${fmt(group.daily)}单，缺失${group.missing}天`:group.backfill?`含过期补估${fmt(group.backfill)}${group.forecast?` · 未来预测${fmt(group.forecast)}`:''}`:group.forecast?`含预测${fmt(group.forecast)}`:'全部真实'}</em></article>`).join('');
+    target.innerHTML=[...groups.values()].map(group=>`<article><span>${esc(group.key)}</span><strong>${group.missing?'—':fmt(group.daily)}</strong><small>周大定</small><em>${group.missing?`已知${fmt(group.daily)}单，缺失${group.missing}天`:group.backfill?`含过期补估${fmt(group.backfill)}${group.forecast?` · 未来预测${fmt(group.forecast)}`:''}`:group.forecast?`含预测${fmt(group.forecast)}`:'全部真实'}</em></article>`).join('');
   }
 
   let forecastRailObserver;
@@ -2652,8 +2642,8 @@
           [...row.cells].forEach((cell,i)=>cell.dataset.label=headings[i]||'');
           if(row.cells.length<5)continue;
           const cell=table.closest('.forecast-score-detail-table')?row.cells[4]:row.cells[3];
-          const details=document.createElement('details');details.className='forecast-score-row-details';
-          const summary=document.createElement('summary');summary.textContent=table.closest('.forecast-score-detail-table')?'展开评分明细':'查看得分原因';
+          const details=document.createElement('details');details.className='forecast-score-row-details';details.open=!!table.closest('.forecast-score-detail-table');
+          const summary=document.createElement('summary');summary.textContent=table.closest('.forecast-score-detail-table')?'评分明细':'查看得分原因';
           summary.setAttribute('aria-label',summary.textContent+'：'+(row.cells[1]?.textContent||''));details.append(summary);
           while(cell.firstChild)details.append(cell.firstChild);cell.append(details);
         }
@@ -2662,7 +2652,7 @@
       const summary=document.createElement('summary');summary.textContent='评分规则与缺失处理';methodology.append(summary);
       for(const block of page.querySelectorAll('.forecast-score-rules,.forecast-score-rule-box,.forecast-score-formula'))methodology.append(block);
       const description=page.querySelector('.forecast-score-hero p');
-      if(description){methodology.append(description.cloneNode(true));description.textContent='先看推荐排名，再展开单车评分明细；评分口径与预测依据一致。';}
+      if(description){methodology.append(description.cloneNode(true));description.textContent='评分口径与预测依据一致。';}
       page.append(methodology);
     });
   }
