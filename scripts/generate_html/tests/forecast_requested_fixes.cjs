@@ -14,9 +14,9 @@ assert.deepEqual(small('智界 RX 2027款',{small:0}),{value:18000,estimated:tru
 root._smallForecastLinked=true;
 assert.equal(small('智界 RX 2027款',{small:0}).value,18000);
 root._smallForecastResult.error='缺少分时数据';
-assert.equal(small('智界 RX 2027款',{small:0}).value,0);
+assert(Number.isNaN(small('智界 RX 2027款',{small:123}).value));
 root._smallForecastResult.error=null;
-assert.equal(small('另一车型',{small:0}).value,0);
+assert(Number.isNaN(small('另一车型',{small:123}).value));
 assert.equal(small('智界 RX 2027款',{small:123,small_end_date:'2026-09-27'}).value,123);
 // Exercise the scoring functions used by both the ranking table and reference controls.
 const ForecastMath=require('../templates/forecast-math.js');
@@ -51,11 +51,11 @@ for(const task of ['small_progress','direct_progress']){
 const conversion=score(reference,'conversion',target);
 assert(conversion.coverage>=.45);
 assert(conversion.parts.some(part=>part.key==='size'&&part.label.includes('小订预测')));
-assert(score(reference,'conversion',{...target,small:0,smallEstimated:false}).coverage<.45);
+assert(rankedForTask('conversion',{...target,small:NaN,smallEstimated:false}).length>0);
 
 asOf='2026-11-13';
-assert.equal(Math.round(score(reference,'direct_share',target).configuredWeight*100),100);
-assert.deepEqual(rankedForTask('direct_share',target),[]);
+assert.equal(Math.round(score(reference,'direct_share',target).configuredWeight*100),48);
+assert(rankedForTask('direct_share',{...target,small:NaN}).length>0);
 assert(rankedForTask('small_progress',target).some(row=>row.item===reference));
 asOf='2026-11-14';
 d1={gross:6750,small_to_big:5400,direct:1350};
@@ -69,3 +69,11 @@ assert(single.includes('<circle')&&single.includes('1,547')&&single.includes('20
 const multiple=chart({series:[{label:'外部预测',values:[1547,0,1600],color:'#7C3AED'}],labels:['2026-09-28','2026-09-29','2026-09-30'],unit:'number',ariaLabel:'导入折线'});
 assert(multiple.includes('<polyline')&&multiple.includes('2026-09-29')&&multiple.includes('0单'));
 console.log('PASS: stage-aware launch ranking, predicted-small scoring, brand classification, hourly eligibility and import charts');
+
+// Size affects ranking but absence during an unfinished small-order phase does not veto references.
+assert(score(reference,'direct_share',target).score>score({...reference,small:180000},'direct_share',target).score);
+assert.equal(score(reference,'direct_share',target).parts.find(p=>p.key==='size').weight,.16);
+assert(!score(reference,'direct_share',target).parts.some(p=>p.key==='final'));
+assert(!score(reference,'direct_share',{...target,tier:'未知',node:'—'}).parts.some(p=>['tier','node'].includes(p.key)));
+for(const rate of [0,.5,1])assert(ForecastMath.steadyReferenceScore({lock_rate:rate},{},{lock_rate:rate}).parts.some(p=>p.key==='lock'&&p.value===1));
+for(const rate of [null,'',-1,1.2])assert(!ForecastMath.steadyReferenceScore({lock_rate:rate},{},{lock_rate:0}).parts.some(p=>p.key==='lock'));

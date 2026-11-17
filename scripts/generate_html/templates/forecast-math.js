@@ -575,9 +575,9 @@
     add('node', isKnownAttribute(target.node) && isKnownAttribute(item.node)
       ? (target.node === item.node ? 1 : 0.62) : NaN,
     `${target.node || '未维护'} ↔ ${item.node || '未维护'}`);
-    const currentLockRate = Number(current.lock_rate);
-    const itemLockRate = Number(item.lock_rate);
-    add('lock', currentLockRate > 0 && itemLockRate > 0
+    const currentLockRate = observedRate(current.lock_rate);
+    const itemLockRate = observedRate(item.lock_rate);
+    add('lock', Number.isFinite(currentLockRate) && Number.isFinite(itemLockRate)
       ? 1 - Math.min(Math.abs(currentLockRate - itemLockRate), 1) : NaN,
     `${(currentLockRate * 100 || 0).toFixed(1)}% ↔ ${(itemLockRate * 100 || 0).toFixed(1)}%`);
     const source=(item.direct_curve||[]).map(observedQuantity),horizon=current.launch_days||source.length;
