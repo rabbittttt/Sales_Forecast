@@ -19,7 +19,7 @@ class SharedDataPathsTests(TestCase):
     def test_standalone_project_requires_shared_inputs_even_when_missing(self):
         with TemporaryDirectory() as folder, patch.dict(os.environ, {"SHARED_DATA_ROOT": ""}):
             project = Path(folder) / "销量预测"
-            shared = (Path(folder) / "共享数据").resolve()
+            shared = (Path(folder) / "工作台数据" / "shared").resolve()
             self.assertEqual(shared_data_root(project), shared)
             self.assertEqual(orders_input_directory(project), shared / "订单汇总")
             self.assertEqual(forecast_reference_directory(project), shared / "订单汇总")
@@ -30,8 +30,8 @@ class SharedDataPathsTests(TestCase):
             project = Path(folder) / "销量预测"
             (project / "output_file").mkdir(parents=True)
             (project / "output_file" / "小订及首销数据整理.xlsx").write_bytes(b"old copy")
-            shared = (Path(folder) / "共享数据").resolve()
-            shared.mkdir()
+            shared = (Path(folder) / "工作台数据" / "shared").resolve()
+            shared.mkdir(parents=True)
             self.assertEqual(orders_input_directory(project), shared / "订单汇总")
             self.assertEqual(forecast_reference_directory(project), shared / "订单汇总")
             self.assertEqual(model_information_directory(project), shared / "车型信息")

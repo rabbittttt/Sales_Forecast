@@ -47,8 +47,8 @@ class InputSnapshotTests(TestCase):
         self.root = Path(temporary.name)
         self.project = self.root / "销量预测"
         self.orders = self.root / "自定义订单"
-        self.references = self.root / "共享数据" / "订单汇总"
-        self.models = self.root / "共享数据" / "车型信息"
+        self.references = self.root / "工作台数据" / "shared" / "订单汇总"
+        self.models = self.root / "工作台数据" / "shared" / "车型信息"
         self.config = self.project / "scripts" / "generate_html" / "config.json"
         self.orders.mkdir(parents=True)
         self.references.mkdir(parents=True)
@@ -139,7 +139,7 @@ class InputSnapshotTests(TestCase):
             scan_inputs(orders, project_root=project)
         self.assertFalse(project.exists())
         self.assertFalse(orders.exists())
-        self.assertFalse((project.parent / "共享数据").exists())
+        self.assertFalse((project.parent / "工作台数据" / "shared").exists())
 
     def test_wall_day_rollover_respects_a_fixed_review_date(self):
         with patch.object(live_server, "date") as wall_date:

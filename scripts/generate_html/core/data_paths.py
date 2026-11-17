@@ -19,7 +19,8 @@ def shared_data_root(project_root: Path = PROJECT_ROOT) -> Path:
     """
     project_root = Path(project_root).resolve()
     configured = os.environ.get("SHARED_DATA_ROOT", "").strip()
-    candidate = Path(configured).expanduser() if configured else Path("..") / "共享数据"
+    base = (project_root / os.environ["PLANHUB_DATA_ROOT"]).resolve() if os.environ.get("PLANHUB_DATA_ROOT") else project_root.parent / "工作台数据"
+    candidate = Path(configured).expanduser() if configured else base / "shared"
     return (candidate if candidate.is_absolute() else project_root / candidate).resolve()
 
 
@@ -45,7 +46,7 @@ def assert_output_is_private(path: Path, project_root: Path = PROJECT_ROOT) -> P
     resolved = Path(path).expanduser().resolve()
     shared_roots = {
         shared_data_root(project_root),
-        (Path(project_root).resolve().parent / "共享数据").resolve(),
+        (Path(project_root).resolve().parent / "工作台数据" / "shared").resolve(),
     }
     if any(resolved.is_relative_to(root) for root in shared_roots):
         raise ValueError(f"共享数据目录只读，输出或缓存必须放在项目输出目录：{resolved}")

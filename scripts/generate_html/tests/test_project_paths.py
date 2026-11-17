@@ -23,7 +23,7 @@ class ProjectPathIsolationTests(TestCase):
             stale = project / "output_file"
             stale.mkdir(parents=True)
             (stale / "小订及首销数据整理.xlsx").write_bytes(b"stale input")
-            shared = (project.parent / "共享数据").resolve()
+            shared = (project.parent / "工作台数据" / "shared").resolve()
             self.assertEqual(data_paths.shared_data_root(project), shared)
             self.assertEqual(data_paths.orders_input_directory(project), shared / "订单汇总")
             self.assertEqual(data_paths.forecast_reference_directory(project), shared / "订单汇总")
@@ -81,7 +81,7 @@ class ProjectPathIsolationTests(TestCase):
     def test_cache_and_inputs_are_separate_during_real_excel_read(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            shared = root / "共享数据"
+            shared = root / "工作台数据" / "shared"
             inputs = shared / "订单汇总"
             inputs.mkdir(parents=True)
             source = inputs / "订单.xlsx"
