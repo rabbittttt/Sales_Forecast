@@ -4215,13 +4215,10 @@ button:focus-visible,select:focus-visible,input:focus-visible {
   min-width:0;padding:0;border:1px solid var(--forecast-border);border-radius:var(--radius);
   background:#fff;box-shadow:none;overflow:hidden;
 }
-.forecast-workspace.forecast-studio .forecast-scenario-head{padding:10px 14px;border-bottom:1px solid var(--line);align-items:center;background:var(--page)}
+.forecast-workspace.forecast-studio .forecast-scenario-head{padding:10px 14px;border-bottom:1px solid var(--line);align-items:center;background:var(--page);box-shadow:none}
 .forecast-workspace.forecast-studio .forecast-scenario-head h4{margin:0;font-size:14px;color:var(--ink);font-weight:700}
 .forecast-workspace.forecast-studio .forecast-scenario-head small{display:block;margin-top:2px;color:var(--muted);font-size:11px;line-height:1.5}
 .forecast-workspace.forecast-studio .forecast-scenario-head>span{font-size:11px;background:var(--primary-soft);color:var(--primary-strong);border-radius:4px;padding:3px 6px;white-space:normal}
-.forecast-workspace.forecast-studio .forecast-scenario.progress .forecast-scenario-head{box-shadow:inset 3px 0 var(--primary)}
-.forecast-workspace.forecast-studio .forecast-scenario.parameter .forecast-scenario-head{box-shadow:inset 3px 0 var(--cyan)}
-.forecast-workspace.forecast-studio .forecast-lifecycle-conclusion .forecast-scenario-head{box-shadow:inset 3px 0 var(--primary)}
 .forecast-metric-strip{display:flex;flex-wrap:wrap;gap:0;padding:12px 2px}
 .forecast-metric{flex:1 1 115px;min-width:0;padding:0 12px;border-left:1px solid var(--line)}
 .forecast-metric:first-child{border-left:0;flex-grow:1.25}
