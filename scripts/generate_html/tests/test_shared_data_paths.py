@@ -82,7 +82,7 @@ print(json.dumps({
             self.assertEqual(Path(paths["summary"]), orders / "鸿蒙智行销量数据汇总.xlsx")
             self.assertEqual(Path(paths["model"]), shared / "车型信息" / "车型基本信息.xlsx")
             self.assertEqual(Path(paths["output"]).parent.name, "static")
-            self.assertEqual(Path(paths["output"]).parent.parent.name, "output_file")
+            self.assertEqual(Path(paths["output"]).parent.parent.name, "forecast")
             self.assertTrue(Path(paths["summary"]).is_relative_to(shared))
             self.assertIn(paths["summary"], paths["history"])
             self.assertEqual(Path(paths["history"][0]), Path(paths["summary"]))

@@ -66,7 +66,7 @@ def assert_summary_output(path: Path, project_root: Path = PROJECT_ROOT) -> Path
 
 def project_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
     configured = os.environ.get("SALES_FORECAST_DATA_DIR", "").strip()
-    candidate = Path(configured).expanduser() if configured else Path("output_file")
+    candidate = Path(configured).expanduser() if configured else persistent_directory(project_root)
     output = candidate if candidate.is_absolute() else Path(project_root) / candidate
     return assert_output_is_private(output, project_root)
 
@@ -81,3 +81,13 @@ def dynamic_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
 
 def excel_cache_directory(project_root: Path = PROJECT_ROOT) -> Path:
     return project_output_directory(project_root) / ".cache" / "excel"
+
+
+def persistent_directory(root):
+    root = Path(root).resolve()
+    value = os.environ.get("PLANHUB_DATA_ROOT", "").strip()
+    base = (root / value).resolve() if value else root.parent / "工作台数据"
+    destination = base / "database" / "forecast"
+    if not destination.exists() and (root / "output_file").is_dir() and any((root / "output_file").iterdir()):
+        raise RuntimeError("旧持久数据尚未迁移，请先停止服务并运行门户的数据迁移工具；不会创建空库。")
+    return destination
