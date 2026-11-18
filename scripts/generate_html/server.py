@@ -18,7 +18,7 @@ import webbrowser
 
 from core.data_paths import (
     PROJECT_ROOT, assert_output_is_private, orders_input_directory,
-    dynamic_output_directory, forecast_summary_path,
+    dynamic_output_directory, dynamic_log_directory, forecast_summary_path,
 )
 from core.live_server import ForecastServer, LiveMonitor, scan_inputs, normalize_prefix
 from core.release import runtime_revision
@@ -32,7 +32,7 @@ LOGGER = logging.getLogger(__name__)
 def build_page(input_dir: Path, live_dir: Path) -> bytes:
     staging = live_dir / f".build-{os.getpid()}" / FORECAST_PAGE_NAME
     command = [sys.executable, str(ROOT / "main.py"), "--no-open", "--force-refresh",
-               "--input", str(input_dir), "--output", str(staging)]
+               "--input", str(input_dir), "--output", str(staging), "--log-dir", str(dynamic_log_directory(PROJECT_ROOT))]
     completed = subprocess.run(command, cwd=PROJECT_ROOT)
     if completed.returncode:
         raise RuntimeError(f"生成器退出码 {completed.returncode}，详情见运行日志")
@@ -70,7 +70,7 @@ def main() -> int:
             raise ValueError("发布运行必须通过 --data-dir 或 SALES_FORECAST_DATA_DIR 指定版本目录外的运行根")
         if not os.environ.get("SHARED_DATA_ROOT", "").strip():
             raise ValueError("发布运行必须显式配置 SHARED_DATA_ROOT")
-    log_dir = output_root / "log"
+    log_dir = dynamic_log_directory(PROJECT_ROOT)
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s",
                         handlers=[logging.StreamHandler(),

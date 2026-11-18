@@ -173,14 +173,16 @@ class LevelFormatter(logging.Formatter):
         return f"{color}{message}\033[0m" if color else message
 
 
-def configure_runtime(output_dir: Path, debug: bool = False) -> Path:
+def configure_runtime(output_dir: Path, debug: bool = False, log_dir: Path | None = None) -> Path:
     """Configure UTF-8 console/file logging before any workbook is opened."""
     output_dir.mkdir(parents=True, exist_ok=True)
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure:
             reconfigure(encoding="utf-8", errors="replace")
-    log_dir = output_dir / "log"
+    if log_dir is None:
+        log_dir = output_dir / "log"
+    log_dir = assert_output_is_private(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = log_dir / f"generate_html_{timestamp}.log"
@@ -492,6 +494,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--check", action="store_true", help="Return a non-zero exit code when validation warnings exist.")
     parser.add_argument("--no-open", action="store_true", help="Generate the HTML without opening the default browser.")
     parser.add_argument("--debug", action="store_true", help="输出调试日志，用于排查数据解析问题。")
+    parser.add_argument("--log-dir", type=Path, help="指定本次生成的日志目录，默认随 HTML 输出")
     parser.add_argument("--force-refresh", action="store_true", help="强制从原始输入重算共享汇总。")
     parser.add_argument(
         "--disable-sales-forecast",
@@ -524,7 +527,7 @@ def main() -> int:
     args = parse_args()
     assert_output_is_private(args.output)
     with build_lock(PROJECT_ROOT):
-        log_file = configure_runtime(args.output.parent, args.debug)
+        log_file = configure_runtime(args.output.parent, args.debug, getattr(args, "log_dir", None))
         try:
             manifest, warnings = build(
                 args.input, args.output, disable_sales_forecast=args.disable_sales_forecast,

@@ -73,11 +73,24 @@ def project_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
 
 
 def static_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
-    return project_output_directory(project_root) / "static"
+    return assert_output_is_private(Path(project_root) / "output_file" / "static", project_root)
 
 
 def dynamic_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
     return project_output_directory(project_root) / "dynamic"
+
+
+def dynamic_log_directory(project_root: Path = PROJECT_ROOT) -> Path:
+    root = Path(project_root).resolve()
+    configured = os.environ.get("PLANHUB_APP_LOG_DIR")
+    if configured:
+        return assert_output_is_private(root / configured, root)
+    base = root / (os.environ.get("PLANHUB_DATA_ROOT") or "../工作台数据")
+    if not os.environ.get("PLANHUB_DATA_ROOT") and (root.parent / "app-release.json").is_file():
+        # An independently launched release has only its external data directory.
+        data = project_output_directory(root)
+        base = data.parent.parent if data.parent.name == "database" else data
+    return assert_output_is_private(base / "logs" / "forecast", root)
 
 
 def excel_cache_directory(project_root: Path = PROJECT_ROOT) -> Path:
@@ -89,6 +102,6 @@ def persistent_directory(root):
     value = os.environ.get("PLANHUB_DATA_ROOT", "").strip()
     base = (root / value).resolve() if value else root.parent / "工作台数据"
     destination = base / "database" / "forecast"
-    if not destination.exists() and (root / "output_file").is_dir() and any((root / "output_file").iterdir()):
+    if not destination.exists() and (root / "output_file" / "dynamic").is_dir():
         raise RuntimeError("旧持久数据尚未迁移，请先停止服务并运行门户的数据迁移工具；不会创建空库。")
     return destination

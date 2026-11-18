@@ -45,14 +45,22 @@ class ProjectPathIsolationTests(TestCase):
         self.assertNotIn(local, HISTORY_CANDIDATES)
         self.assertFalse(data_paths.excel_cache_directory().is_relative_to(data_paths.shared_data_root()))
 
-    def test_static_and_dynamic_reports_share_only_the_private_output_root(self):
+    def test_static_report_is_local_and_dynamic_cache_uses_the_data_root(self):
         with TemporaryDirectory() as directory, patch.dict(os.environ, {"SHARED_DATA_ROOT": ""}):
             project = Path(directory) / "销量预测"
             output = data_paths.project_output_directory(project)
             static = data_paths.static_output_directory(project)
             dynamic = data_paths.dynamic_output_directory(project)
-            self.assertEqual(static, output / "static")
+            self.assertEqual(static, (project / "output_file" / "static").resolve())
+            static.mkdir(parents=True)
+            self.assertEqual(data_paths.project_output_directory(project), output)
+            self.assertEqual(data_paths.dynamic_log_directory(project), (project.parent / "工作台数据" / "logs" / "forecast").resolve())
+            with patch.dict(os.environ, {"PLANHUB_APP_LOG_DIR": "../custom/logs/forecast"}):
+                self.assertEqual(data_paths.dynamic_log_directory(project), (project.parent / "custom/logs/forecast").resolve())
             self.assertEqual(dynamic, output / "dynamic")
+            (project.parent / "app-release.json").write_text("{}", encoding="utf8")
+            with patch.dict(os.environ, {"SALES_FORECAST_DATA_DIR": "../deployed/database/forecast"}):
+                self.assertEqual(data_paths.dynamic_log_directory(project), (project.parent / "deployed/logs/forecast").resolve())
             self.assertNotEqual(static, dynamic)
             self.assertFalse(static.is_relative_to(dynamic))
             self.assertFalse(dynamic.is_relative_to(static))
