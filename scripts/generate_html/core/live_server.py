@@ -24,6 +24,7 @@ from core.renderer import FORECAST_PAGE_NAME, _write_text_atomic
 
 LOGGER = logging.getLogger(__name__)
 CLIENT_PATH = Path(__file__).resolve().parents[1] / "templates" / "forecast-live.js"
+SUMMARY_REUSE_UNAVAILABLE = 3
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,8 @@ def scan_inputs(input_dir: Path, project_root: Path = PROJECT_ROOT) -> InputSnap
 class LiveMonitor:
     def __init__(self, scan: Callable[[], InputSnapshot], build: Callable[[], bytes],
                  clock=time.monotonic, scan_interval=300, stable_seconds=60,
-                 output_file: Path | None = None, cache_files: tuple[Path, ...] = ()):
+                 output_file: Path | None = None, cache_files: tuple[Path, ...] = (), *,
+                 build_from_current_summary: Callable[[], bytes | None] | None = None):
         self.scan = scan
         self.build = build
         self.clock = clock
@@ -67,6 +69,7 @@ class LiveMonitor:
         self.stable_seconds = stable_seconds
         self.output_file = output_file
         self.cache_files = cache_files
+        self._build_from_current_summary = build_from_current_summary
         self._restored = None
         self._lock = threading.Lock()
         self._tick_lock = threading.Lock()
@@ -177,17 +180,25 @@ class LiveMonitor:
             self._pending = None
             self._set_state("ready")
             return
-        if current != self._pending:
-            self._pending = current
-            self._stable_since = now
-            self._set_state("waiting")
-            LOGGER.info("检测到输入或业务日期变化，等待连续 %s 秒稳定", self.stable_seconds)
-            return
-        if now - self._stable_since < self.stable_seconds:
-            return
-        self._set_state("building")
-        LOGGER.info("输入已稳定，开始更新预测")
-        content = self.build()
+        content = None
+        if self._applied is None and self._build_from_current_summary is not None:
+            build_from_summary = self._build_from_current_summary
+            self._build_from_current_summary = None
+            self._set_state("building")
+            LOGGER.info("检查现有销量汇总，尝试生成当前版本页面")
+            content = build_from_summary()
+        if content is None:
+            if current != self._pending:
+                self._pending = current
+                self._stable_since = now
+                self._set_state("waiting")
+                LOGGER.info("需要从原始输入更新预测，等待连续 %s 秒稳定", self.stable_seconds)
+                return
+            if now - self._stable_since < self.stable_seconds:
+                return
+            self._set_state("building")
+            LOGGER.info("输入已稳定，开始更新预测")
+            content = self.build()
         if not content:
             raise ValueError("生成器未返回有效 HTML")
         after = self.scan()

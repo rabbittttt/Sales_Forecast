@@ -188,6 +188,70 @@ class LiveMonitorTests(TestCase):
         self.assertTrue(revision)
         self.assertEqual(self.monitor.status()["revision"], revision)
 
+    def test_new_version_renders_current_summary_immediately_then_resumes_normal_updates(self):
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / FORECAST_PAGE_NAME
+            rendered = b"<html>new version using existing summary</html>"
+            reuse = Mock(return_value=rendered)
+            self.monitor = LiveMonitor(self.scan, self.build, clock=self.clock, output_file=output,
+                                       build_from_current_summary=reuse)
+
+            self.monitor.tick()
+            self.assertEqual(self.monitor.status()["state"], "ready")
+            self.assertEqual(self.monitor.page()[0], rendered)
+            self.assertEqual(output.read_bytes(), rendered)
+            self.build.assert_not_called()
+
+            self.current = snapshot(day="2026-11-12")
+            self.tick_after(299)
+            self.assertEqual(self.monitor.status()["state"], "ready")
+            self.tick_after(1)
+            self.assertEqual(self.monitor.status()["state"], "waiting")
+            self.tick_after(59)
+            self.build.assert_not_called()
+            self.assertEqual(output.read_bytes(), rendered)
+            self.tick_after(1)
+            self.build.assert_called_once_with()
+            self.assertEqual(output.read_bytes(), self.build.return_value)
+            reuse.assert_called_once_with()
+
+    def test_unusable_startup_summary_falls_back_to_waiting_before_rebuild(self):
+        reuse = Mock(return_value=None)
+        self.monitor = LiveMonitor(self.scan, self.build, clock=self.clock, build_from_current_summary=reuse)
+
+        self.monitor.tick()
+        self.assertEqual(self.monitor.status()["state"], "waiting")
+        self.assertIsNone(self.monitor.page()[0])
+        self.tick_after(59)
+        self.build.assert_not_called()
+        self.tick_after(1)
+        self.assertEqual(self.monitor.page()[0], self.build.return_value)
+        self.build.assert_called_once_with()
+        reuse.assert_called_once_with()
+
+    def test_input_changes_during_startup_render_discard_the_page_and_start_a_fresh_wait(self):
+        def reuse_summary():
+            self.clock.advance(20)
+            self.current = snapshot(files=(("orders.xlsx", 200, 11),))
+            return b"<html>page built from changing inputs</html>"
+
+        reuse = Mock(side_effect=reuse_summary)
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / FORECAST_PAGE_NAME
+            self.monitor = LiveMonitor(self.scan, self.build, clock=self.clock, output_file=output,
+                                       build_from_current_summary=reuse)
+
+            self.monitor.tick()
+            self.assertEqual(self.monitor.status()["state"], "waiting")
+            self.assertIsNone(self.monitor.page()[0])
+            self.assertFalse(output.exists())
+            self.tick_after(59)
+            self.build.assert_not_called()
+            self.tick_after(1)
+            self.assertEqual(output.read_bytes(), self.build.return_value)
+            self.build.assert_called_once_with()
+            reuse.assert_called_once_with()
+
     def test_change_during_stability_window_restarts_the_full_wait(self):
         self.monitor.tick()
         self.tick_after(55)
@@ -631,6 +695,37 @@ class ForcedSummaryRefreshTests(TestCase):
                     self.assertEqual(command.count("--force"), int(force))
                     self.assertEqual(command[command.index("--orders") + 1], str((root / "inputs").resolve()))
                     self.assertEqual(command[command.index("--output") + 1], str(summary.resolve()))
+
+    def test_dynamic_generator_distinguishes_startup_reuse_from_forced_refresh(self):
+        import server as entry
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            live_dir = root / "dynamic"
+            rendered = b"<html>generated page</html>"
+
+            def generate(command, *, cwd):
+                output = Path(command[command.index("--output") + 1])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_bytes(rendered)
+                return SimpleNamespace(returncode=0)
+
+            with patch.object(entry.subprocess, "run", side_effect=generate) as run:
+                self.assertEqual(entry.build_page(root / "orders", live_dir, reuse_summary_only=True), rendered)
+                self.assertEqual(entry.build_page(root / "orders", live_dir), rendered)
+            self.assertIn("--reuse-summary-only", run.call_args_list[0].args[0])
+            self.assertNotIn("--force-refresh", run.call_args_list[0].args[0])
+            self.assertIn("--force-refresh", run.call_args_list[1].args[0])
+            self.assertNotIn("--reuse-summary-only", run.call_args_list[1].args[0])
+
+            # Even with an old staging page, the unavailable code must enter the wait.
+            with patch.object(entry.subprocess, "run", return_value=SimpleNamespace(returncode=3)):
+                self.assertIsNone(entry.build_page(root / "orders", live_dir, reuse_summary_only=True))
+                with self.assertRaises(RuntimeError):
+                    entry.build_page(root / "orders", live_dir)
+            with patch.object(entry.subprocess, "run", return_value=SimpleNamespace(returncode=1)):
+                with self.assertRaises(RuntimeError):
+                    entry.build_page(root / "orders", live_dir, reuse_summary_only=True)
 
 
 class StartupReuseTests(TestCase):

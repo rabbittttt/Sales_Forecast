@@ -25,6 +25,7 @@ from core.data_paths import orders_input_directory, assert_output_is_private, fo
 from core.discovery import discover_subjects, set_capabilities
 from core.excel import WorkbookStore, clean_text, format_excel_cell, reset_conflict_diagnostics
 from core.forecast_summary import SUMMARY_NAME, visible_target_names
+from core.live_server import SUMMARY_REUSE_UNAVAILABLE
 from core.model_identity import FORECAST_SOURCE_PATH
 from core.renderer import b64gzip, render_dashboard, forecast_manifest
 from core.validation import validate_manifest
@@ -38,6 +39,10 @@ AUTO_OPEN_HTML = True
 LOGGER = logging.getLogger("sales_forecast")
 BUILD_DIAGNOSTICS: list[str] = []
 DIAGNOSTIC_COUNTS = {"WARNING": 0, "ERROR": 0}
+
+
+class ForecastSummaryNotCurrent(Exception):
+    """The startup render needs a current, readable summary workbook."""
 
 
 class DuplicateDiagnosticFilter(logging.Filter):
@@ -149,6 +154,29 @@ def refresh_sales_forecast_data(config: dict[str, Any], input_dir: Path | None =
     if returncode:
         raise RuntimeError(f"销量预测二次处理刷新失败，退出码 {returncode}")
     LOGGER.info("销量预测二次处理刷新：完成")
+
+
+def require_current_forecast_summary(input_dir: Path, summary_path: Path, as_of_date: str) -> None:
+    """Apply the existing refresh checks without writing the shared workbook."""
+    from tools.refresh_sales_forecast_data import (
+        DEFAULT_SOURCE, SUMMARY_FORMAT_ERRORS, audit_final_forecast,
+        resolve_source_path, summary_is_current,
+    )
+
+    try:
+        source = resolve_source_path(DEFAULT_SOURCE)
+        if not summary_is_current(source, summary_path, source, input_dir, as_of_date):
+            raise ForecastSummaryNotCurrent
+        audit_day = date.fromisoformat(as_of_date) if as_of_date else date.today()
+        with summary_path.open("rb") as handle:
+            workbook = load_workbook(handle, read_only=True, data_only=True)
+            try:
+                audit_final_forecast(workbook, audit_day)
+            finally:
+                workbook.close()
+    except (FileNotFoundError, *SUMMARY_FORMAT_ERRORS) as exc:
+        raise ForecastSummaryNotCurrent from exc
+    LOGGER.info("销量数据汇总已是最新，直接生成当前版本页面")
 
 
 def forecast_target_names(summary_path: Path) -> list[str]:
@@ -314,7 +342,8 @@ def raw_tables(store: WorkbookStore) -> tuple[list[dict[str, Any]], dict[str, st
 
 
 def build(
-    input_dir: Path, output_file: Path, *, disable_sales_forecast: bool = False, force_refresh: bool = False
+    input_dir: Path, output_file: Path, *, disable_sales_forecast: bool = False,
+    force_refresh: bool = False, reuse_summary_only: bool = False,
 ) -> tuple[dict[str, Any], list[str]]:
     build_started = perf_counter()
     assert_output_is_private(output_file)
@@ -339,9 +368,12 @@ def build(
     if manifest_mode not in {"compact", "full", "off"}:
         raise ValueError("config.json 的 build_manifest_mode 必须是 compact、full 或 off")
     stage_started = perf_counter()
-    refresh_sales_forecast_data(config, input_dir)
-    refresh_seconds = perf_counter() - stage_started
     summary_path = forecast_summary_path(PROJECT_ROOT)
+    if reuse_summary_only:
+        require_current_forecast_summary(input_dir, summary_path, config.get("forecast_as_of_date") or "")
+    else:
+        refresh_sales_forecast_data(config, input_dir)
+    refresh_seconds = perf_counter() - stage_started
     cache_dir = output_file.parent / ".cache" / "excel"
     store = WorkbookStore(input_dir, cache_dir=cache_dir)
     stage_started = perf_counter()
@@ -495,7 +527,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-open", action="store_true", help="Generate the HTML without opening the default browser.")
     parser.add_argument("--debug", action="store_true", help="输出调试日志，用于排查数据解析问题。")
     parser.add_argument("--log-dir", type=Path, help="指定本次生成的日志目录，默认随 HTML 输出")
-    parser.add_argument("--force-refresh", action="store_true", help="强制从原始输入重算共享汇总。")
+    refresh_mode = parser.add_mutually_exclusive_group()
+    refresh_mode.add_argument("--force-refresh", action="store_true", help="强制从原始输入重算共享汇总。")
+    refresh_mode.add_argument("--reuse-summary-only", action="store_true", help="仅在共享汇总有效时生成网页，不重算汇总。")
     parser.add_argument(
         "--disable-sales-forecast",
         action="store_true",
@@ -532,7 +566,11 @@ def main() -> int:
             manifest, warnings = build(
                 args.input, args.output, disable_sales_forecast=args.disable_sales_forecast,
                 force_refresh=getattr(args, "force_refresh", False),
+                reuse_summary_only=getattr(args, "reuse_summary_only", False),
             )
+        except ForecastSummaryNotCurrent:
+            LOGGER.info("共享销量汇总需要更新，本次跳过页面生成")
+            return SUMMARY_REUSE_UNAVAILABLE
         except Exception:
             LOGGER.exception("生成失败，请根据上方错误和日志排查")
             LOGGER.error("运行日志: %s", log_file)

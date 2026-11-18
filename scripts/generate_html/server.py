@@ -20,7 +20,7 @@ from core.data_paths import (
     PROJECT_ROOT, assert_output_is_private, orders_input_directory,
     dynamic_output_directory, dynamic_log_directory, forecast_summary_path,
 )
-from core.live_server import ForecastServer, LiveMonitor, scan_inputs, normalize_prefix
+from core.live_server import ForecastServer, LiveMonitor, SUMMARY_REUSE_UNAVAILABLE, scan_inputs, normalize_prefix
 from core.release import runtime_revision
 from core.renderer import FORECAST_PAGE_NAME
 
@@ -29,11 +29,14 @@ ROOT = Path(__file__).resolve().parent
 LOGGER = logging.getLogger(__name__)
 
 
-def build_page(input_dir: Path, live_dir: Path) -> bytes:
+def build_page(input_dir: Path, live_dir: Path, *, reuse_summary_only: bool = False) -> bytes | None:
     staging = live_dir / f".build-{os.getpid()}" / FORECAST_PAGE_NAME
-    command = [sys.executable, str(ROOT / "main.py"), "--no-open", "--force-refresh",
+    refresh_mode = "--reuse-summary-only" if reuse_summary_only else "--force-refresh"
+    command = [sys.executable, str(ROOT / "main.py"), "--no-open", refresh_mode,
                "--input", str(input_dir), "--output", str(staging), "--log-dir", str(dynamic_log_directory(PROJECT_ROOT))]
     completed = subprocess.run(command, cwd=PROJECT_ROOT)
+    if reuse_summary_only and completed.returncode == SUMMARY_REUSE_UNAVAILABLE:
+        return None
     if completed.returncode:
         raise RuntimeError(f"生成器退出码 {completed.returncode}，详情见运行日志")
     content = staging.read_bytes()
@@ -84,7 +87,8 @@ def main() -> int:
     monitor = LiveMonitor(lambda: scan_inputs(input_dir),
                           lambda: build_page(input_dir, live_dir),
                           output_file=live_dir / FORECAST_PAGE_NAME,
-                          cache_files=(forecast_summary_path(PROJECT_ROOT),))
+                          cache_files=(forecast_summary_path(PROJECT_ROOT),),
+                          build_from_current_summary=lambda: build_page(input_dir, live_dir, reuse_summary_only=True))
     monitor.restore()
     try:
         server = ForecastServer((args.host, args.port), monitor, live_dir / "forecast_assets", instance_id, args.public_prefix)
