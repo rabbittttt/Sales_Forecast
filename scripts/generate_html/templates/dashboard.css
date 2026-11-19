@@ -4921,3 +4921,35 @@ body.forecast-app .forecast-workspace.forecast-studio .forecast-target-heading s
 body.forecast-app .forecast-workspace.forecast-studio .forecast-target-settings .forecast-target-form label { font-size: var(--type-note); }
 
 body.forecast-app .forecast-workspace.forecast-studio .forecast-target-sources button { font-size: var(--type-body); }
+
+body.forecast-app .module-bar .module-nav { gap: 6px; }
+
+body.forecast-app .module-bar .module-nav :is(button, a) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--type-body);
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: none;
+  transition: color 160ms, background-color 160ms;
+}
+body.forecast-app .module-bar .module-nav :is(button, a):not(:disabled):hover { background: var(--page); color: var(--ink); }
+body.forecast-app .module-bar .module-nav :is(button, a).active:not(:disabled) { background: var(--primary-soft); color: var(--primary-strong); font-weight: 600; }
+body.forecast-app .module-bar .module-nav :is(button, a):focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+body.forecast-app .module-bar .module-nav :is(button, a) .module-icon { width: 18px; height: 18px; flex: 0 0 18px; color: inherit; opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  body.forecast-app .module-bar .module-nav :is(button, a) { transition: none; }
+}
+@media (max-width: 700px) {
+  body.forecast-app .module-bar .module-nav :is(button, a) { padding-inline: 4px; }
+}
