@@ -645,11 +645,19 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(process.argv[1], 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
-const reply = (revision, ok=true) => ({ok, json:async () => ({revision})});
-function client(initial, hidden=false) {
-  const queue = [initial], requests = [], handlers = new Map();
-  const document = {hidden, currentScript:{src:'https://portal.test/forecast/__forecast_live.js',dataset:{revision:'published'}},
-    addEventListener:(name, callback) => handlers.set(name, callback)};
+const reply = (revision, ok=true, status={}) => ({ok, json:async () => ({revision, ...status})});
+function client(initial, hidden=false, previous=false) {
+  const queue = [initial], requests = [], handlers = new Map(), labels = [];
+  const brand = {append: label => labels.push(label)};
+  const document = {
+    hidden, currentScript:{src:'https://portal.test/forecast/__forecast_live.js',
+      dataset:{revision:'published', previousResult:previous ? 'true' : undefined}},
+    addEventListener:(name, callback) => handlers.set(name, callback),
+    querySelector:selector => selector === '.topbar .brand > div' ? brand : null,
+    createElement:() => ({textContent:'', style:{}, setAttribute() {}, remove() {
+      labels.splice(labels.indexOf(this), 1);
+    }})
+  };
   let poll, interval, reloads=0, unexpected=0;
   vm.runInNewContext(source, {
     document, URL,
@@ -663,7 +671,7 @@ function client(initial, hidden=false) {
       return response;
     }
   }, {filename:process.argv[1]});
-  return {document, queue, requests, handlers,
+  return {document, queue, requests, handlers, labels,
     poll:() => poll(),
     get reloads() {return reloads},
     get interval() {return interval},
@@ -705,6 +713,23 @@ for (const revision of ['published','',null]) {
   await current.poll();
 }
 assert.equal(current.requests.length,4);
+assert.equal(current.reloads,0);
+current.verifyRequests();
+""")
+
+    def test_previous_result_notice_follows_refresh_state_without_reloading_the_same_revision(self):
+        self.run_client("""
+const previous = previous_result => reply('published', true, {previous_result, state: 'waiting'});
+const current = client(previous(true), false, true);
+assert.match(current.labels[0].textContent,/后台数据刷新中/);
+await flush();
+assert.equal(current.labels.length,1);
+current.queue.push(reply('published', true, {previous_result: true, state: 'error'}));
+await current.poll();
+assert.match(current.labels[0].textContent,/后台数据刷新失败.*重试/);
+current.queue.push(reply('published', true, {previous_result: false, state: 'ready'}));
+await current.poll();
+assert.equal(current.labels.length,0);
 assert.equal(current.reloads,0);
 current.verifyRequests();
 """)

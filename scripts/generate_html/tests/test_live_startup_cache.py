@@ -80,8 +80,11 @@ class LiveStartupCacheTests(TestCase):
         build.assert_not_called()
         self.assertNotEqual(restarted.status()["state"], "ready",
                             "a checkpoint is only a candidate until real inputs are scanned")
+        self.assertTrue(restarted.status()["previous_result"])
         restarted.tick()
         self.assertEqual(restarted.status()["state"], "ready")
+        self.assertFalse(restarted.status()["previous_result"])
+        self.assertEqual(restarted.page(), original.page())
         self.assertEqual(scan.call_count, 1)
         build.assert_not_called()
         clock.advance(299)
@@ -153,9 +156,11 @@ class LiveStartupCacheTests(TestCase):
                 previous, _, _, _ = self.publish()
                 self.current = changed
                 restarted, clock, _, build = self.monitor()
+                build.return_value = b"<html><body>updated forecast</body></html>"
                 self.assertTrue(restarted.restore())
                 restarted.tick()
                 self.assertEqual(restarted.status()["state"], "waiting")
+                self.assertTrue(restarted.status()["previous_result"])
                 self.assertEqual(restarted.page(), previous.page())
                 clock.advance(59)
                 restarted.tick()
@@ -163,6 +168,9 @@ class LiveStartupCacheTests(TestCase):
                 clock.advance(1)
                 restarted.tick()
                 self.assertEqual(build.call_count, 1)
+                self.assertEqual(restarted.page()[0], build.return_value)
+                self.assertNotEqual(restarted.page()[1], previous.page()[1])
+                self.assertFalse(restarted.status()["previous_result"])
 
     def test_unavailable_inputs_do_not_become_ready_from_checkpoint_alone(self):
         previous, _, _, _ = self.publish()
@@ -172,6 +180,7 @@ class LiveStartupCacheTests(TestCase):
         with self.assertLogs(live_server.LOGGER, level="ERROR"):
             restarted.tick()
         self.assertEqual(restarted.status()["state"], "error")
+        self.assertTrue(restarted.status()["previous_result"])
         self.assertEqual(restarted.page(), previous.page())
         build.assert_not_called()
 

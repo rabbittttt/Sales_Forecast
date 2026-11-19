@@ -147,7 +147,7 @@ class LiveMonitor:
             content = self.output_file.read_bytes()
             if not content:
                 return False
-            self.seed(content)
+            self.seed(content, previous=True)
             saved = json.loads(self.checkpoint_file.read_text(encoding="utf-8"))
             if saved.get("schema_version") != 1 or saved.get("revision") != self.page()[1]:
                 return False
@@ -184,6 +184,8 @@ class LiveMonitor:
     def _set_state(self, state: str, error: str = "") -> None:
         with self._lock:
             self._state, self._error = state, error
+            if state == "ready":
+                self._previous_result = False
 
     def tick(self) -> None:
         if not self._tick_lock.acquire(blocking=False):
