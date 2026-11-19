@@ -4589,7 +4589,7 @@ body.forecast-app .topbar {
   gap:10px 20px;
   min-height:68px;
   padding:12px 22px;
-  border-bottom:1px solid var(--line);
+  border-bottom:0;
   background:#fff;
   box-shadow:none;
 }
