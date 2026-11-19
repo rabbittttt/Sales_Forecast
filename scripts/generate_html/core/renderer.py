@@ -15,6 +15,7 @@ from core.discovery import aggregate_subject_aliases
 
 
 FORECAST_PAGE_NAME = "鸿蒙智行销量预测.html"
+FORECAST_PAGE_TITLE = "销量预测"
 
 
 def forecast_manifest(manifest: dict[str, Any], *, forecast_disabled: bool = False) -> dict[str, Any]:
@@ -26,8 +27,8 @@ def forecast_manifest(manifest: dict[str, Any], *, forecast_disabled: bool = Fal
         "app_mode": "forecast",
         "forecast_disabled": forecast_disabled,
         "forecast_subject_aliases": aggregate_subject_aliases(),
-        "meta": {**manifest.get("meta", {}), "title": "鸿蒙智行销量预测"},
-        "config": {**manifest.get("config", {}), "title": "鸿蒙智行销量预测",
+        "meta": {**manifest.get("meta", {}), "title": FORECAST_PAGE_TITLE},
+        "config": {**manifest.get("config", {}), "title": FORECAST_PAGE_TITLE,
                    "module_order": ["sales_forecast"],
                    "module_labels": {key: label for key, label in manifest.get("config", {}).get("module_labels", {}).items()
                                      if key == "sales_forecast"}},
@@ -170,6 +171,8 @@ def render_dashboard(manifest: dict[str, Any], template_dir: Path, output_file: 
     main_payload = b64gzip(json.dumps(main_manifest, ensure_ascii=False, separators=(",", ":")))
     raw_payload = json.dumps(raw_blocks, ensure_ascii=False, separators=(",", ":"))
     board_payload = json.dumps(dashboard_blocks, separators=(",", ":"))
+    title = FORECAST_PAGE_TITLE if manifest.get("app_mode") == "forecast" else "鸿蒙智行订单分析汇总"
+    html = html.replace("__DASHBOARD_TITLE__", title)
     html = html.replace("__DASHBOARD_CSS__", css)
     html = html.replace("__DASHBOARD_DATA__", main_payload)
     html = html.replace("__DASHBOARD_RAW__", raw_payload)

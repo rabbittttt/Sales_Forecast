@@ -642,7 +642,7 @@
     state.forecastCampaign=params.get("forecastCampaign")||null;
     const requestedView=normalizeForecastView(params.get("forecastView"));if(forecastViews.includes(requestedView))state.forecastView=requestedView;
     if(!FORECAST_APP&&DATA.forecast_page&&state.module==='sales_forecast'&&moduleAvailable(subject(),'sales_forecast')){location.replace(forecastPageUrl());return;}
-    if(FORECAST_APP){document.title='鸿蒙智行 · 销量预测';$('.brand strong').textContent=document.title;$('#subjectSelect').setAttribute('aria-label','预测车型');}
+    if(FORECAST_APP)$('#subjectSelect').setAttribute('aria-label','预测车型');
     $("#updatedAt").textContent=`生成时间 ${DATA.meta.generated_at.replace("T"," ")}`;
     bindStatic();renderSubjectSelect();if(await ensureState()===false)return;await renderAll();syncUrl("replace");
   }
