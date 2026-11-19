@@ -5017,3 +5017,7 @@ body.forecast-app .workspace:has(#page) { padding-top: var(--dashboard-gap); }
   body.forecast-app .topbar .filters select { height: 32px; padding-block: 0; }
   body.forecast-app .module-bar .module-nav button { padding-inline: 12px; }
 }
+
+body.forecast-app .topbar .brand, .module-nav :is(button, a), .forecast-target-tabs button, .forecast-tabs button, .forecast-lifecycle-subtabs button {
+  font-family: "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+}
