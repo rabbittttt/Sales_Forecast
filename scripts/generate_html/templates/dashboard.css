@@ -4957,6 +4957,7 @@ body.forecast-app .module-bar .module-nav :is(button, a) .module-icon { width: 1
 /* Shared vertical rhythm of the embedded dashboards. */
 :root {
   --toolbar-height: 64px;
+  --navigation-gutter: 24px;
   --navigation-height: 56px;
   --dashboard-gap: 16px;
 }
@@ -4978,6 +4979,11 @@ body.forecast-app .topbar .topbar-end {
 }
 body.forecast-app .topbar .filters { flex: 0 0 auto; flex-wrap: nowrap; }
 body.forecast-app .topbar .filters > * { flex-shrink: 0; }
+@media (max-width: 700px) {
+  :root { --navigation-gutter: 12px; }
+}
+body.forecast-app .topbar,
+body.forecast-app .module-bar { width: 100%; padding-inline: var(--navigation-gutter); }
 body.forecast-app .module-bar {
   height: var(--navigation-height);
   padding-block: 0;

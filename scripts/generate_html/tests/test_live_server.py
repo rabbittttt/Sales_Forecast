@@ -648,12 +648,13 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 const reply = (revision, ok=true, status={}) => ({ok, json:async () => ({revision, ...status})});
 function client(initial, hidden=false, previous=false) {
   const queue = [initial], requests = [], handlers = new Map(), labels = [];
-  const brand = {append: label => labels.push(label)};
+  const toolbar = {append: label => labels.push(label)};
   const document = {
     hidden, currentScript:{src:'https://portal.test/forecast/__forecast_live.js',
       dataset:{revision:'published', previousResult:previous ? 'true' : undefined}},
     addEventListener:(name, callback) => handlers.set(name, callback),
-    querySelector:selector => selector === '.topbar .brand > div' ? brand : null,
+    head:{append() {}},
+    querySelector:selector => selector === '.topbar' ? toolbar : null,
     createElement:() => ({textContent:'', style:{}, setAttribute() {}, remove() {
       labels.splice(labels.indexOf(this), 1);
     }})
