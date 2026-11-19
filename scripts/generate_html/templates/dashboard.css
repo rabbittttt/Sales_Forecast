@@ -4840,7 +4840,7 @@ body.forecast-app .app-shell {
 body.forecast-app .module-bar {
   padding:7px 20px;
   border-right:0;
-  border-bottom:1px solid var(--line);
+  border-bottom:0;
   overflow:visible;
 }
 body.forecast-app .module-bar .module-nav {flex-direction:row;flex-wrap:wrap}
