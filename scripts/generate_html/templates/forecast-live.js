@@ -1,7 +1,17 @@
 (() => {
   "use strict";
-  const revision = document.currentScript.dataset.revision;
-  const statusUrl = new URL("api/status", document.currentScript.src).href;
+  const script = document.currentScript;
+  const revision = script.dataset.revision;
+  const statusUrl = new URL("api/status", script.src).href;
+  if (script.dataset.previousResult === "true") {
+    const updatedAt = document.getElementById("updatedAt");
+    if (updatedAt) {
+      const label = document.createElement("span");
+      label.setAttribute("role", "status");
+      label.textContent = "上次生成结果 · ";
+      updatedAt.before(label);
+    }
+  }
   let checking = false;
   async function checkForUpdate() {
     if (checking || document.hidden) return;

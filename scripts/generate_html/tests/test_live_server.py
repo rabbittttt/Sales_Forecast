@@ -4,6 +4,7 @@ from __future__ import annotations
 import dataclasses
 from contextlib import ExitStack
 from datetime import date
+import hashlib
 import http.client
 import io
 import json
@@ -154,6 +155,42 @@ class InputSnapshotTests(TestCase):
             wall_date.today.return_value = date(2026, 11, 13)
             self.assertEqual(self.scan(), fixed)
             self.assertEqual(fixed.day, "2026-11-09")
+
+
+class PublishedPageFallbackTests(TestCase):
+    def publish(self, version, content, modified, *, schema=1, revision=None):
+        version.mkdir(parents=True)
+        page = version / FORECAST_PAGE_NAME
+        page.write_bytes(content)
+        checkpoint = page.with_name(page.name + ".state.json")
+        checkpoint.write_text(json.dumps({
+            "schema_version": schema,
+            "revision": revision or hashlib.sha256(content).hexdigest(),
+        }), encoding="utf-8")
+        os.utime(checkpoint, (modified, modified))
+        return page
+
+    def test_uses_the_newest_verified_page_even_when_newer_attempts_are_incomplete(self):
+        with TemporaryDirectory() as folder:
+            source = Path(folder).resolve() / "source-key"
+            current = source / ("a" * 64)
+            self.publish(source / ("b" * 64), b"old valid", 1_700_000_000)
+            self.publish(source / ("c" * 64), b"newest valid", 1_700_000_001)
+            missing_page = self.publish(source / ("d" * 64), b"interrupted", 1_700_000_002)
+            missing_page.unlink()
+            self.publish(source / ("e" * 64), b"corrupt", 1_700_000_003, revision="f" * 64)
+            self.publish(source / ("f" * 64), b"unsupported schema", 1_700_000_004, schema=999)
+
+            self.assertEqual(live_server.previous_published_page(current), b"newest valid")
+
+    def test_other_input_keys_and_current_version_are_not_previous_results(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            current = root / "source-key" / ("a" * 64)
+            self.publish(current, b"current version", 1_700_000_000)
+            self.publish(root / "other-source-key" / ("b" * 64), b"other input", 1_700_000_001)
+
+            self.assertIsNone(live_server.previous_published_page(current))
 
 
 class LiveMonitorTests(TestCase):
@@ -479,7 +516,10 @@ class ForecastHTTPTests(TestCase):
         self.build.assert_not_called()
 
     def test_unbuilt_page_waits_while_readiness_distinguishes_missing_data(self):
-        self.assertEqual(self.get("/")[0], 200)
+        status, _, waiting = self.get("/")
+        self.assertEqual(status, 200)
+        self.assertIn("正在生成销量预测", waiting.decode("utf-8"))
+        self.assertIn(b"setTimeout(()=>location.reload(),5000)", waiting)
         self.assertEqual(self.get("/healthz")[0], 200)
         self.assertFalse(json.loads(self.get("/healthz")[2])["ready"])
         self.assertEqual(self.get("/readyz")[0], 503)
@@ -492,6 +532,39 @@ class ForecastHTTPTests(TestCase):
             self.assertIn(key, result)
         self.assertEqual(result["revision"], self.monitor.page()[1])
         self.build.assert_not_called()
+
+    def test_initial_generation_failure_is_visible_without_disclosing_backend_details(self):
+        self.server.public_prefix = "/forecast/"
+        self.monitor._set_state("error", "fixture backend path")
+        status, _, body = self.get("/forecast/")
+
+        self.assertEqual(status, 200)
+        self.assertIn("销量预测生成失败", body.decode("utf-8"))
+        self.assertIn(b"setTimeout(()=>location.reload(),5000)", body)
+        self.assertNotIn(b"fixture backend path", body)
+
+    def test_previous_page_remains_available_until_the_new_version_publishes(self):
+        self.server.public_prefix = "/forecast/"
+        self.monitor.seed(b"<html><body>previous publication</body></html>", previous=True)
+        initial = json.loads(self.get("/forecast/api/status")[2])
+        self.assertTrue(initial["previous_result"])
+        body = self.get("/forecast/")[2]
+        self.assertIn(b"previous publication", body)
+        self.assertIn(b'data-previous-result="true"', body)
+        self.assertIn(b'src="/forecast/__forecast_live.js"', body)
+
+        self.monitor.tick()
+        self.build.assert_not_called()
+        self.assertTrue(json.loads(self.get("/forecast/api/status")[2])["previous_result"])
+        self.clock.advance(60)
+        self.monitor.tick()
+        self.build.assert_called_once_with()
+        current = json.loads(self.get("/forecast/api/status")[2])
+        self.assertFalse(current["previous_result"])
+        self.assertNotEqual(current["revision"], initial["revision"])
+        body = self.get("/forecast/")[2]
+        self.assertIn(b"fresh page", body)
+        self.assertNotIn(b"data-previous-result", body)
 
     def test_status_api_revision_changes_only_after_successful_publication(self):
         self.monitor.seed(b"<html>last good</html>")

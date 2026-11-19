@@ -57,6 +57,40 @@ def scan_inputs(input_dir: Path, project_root: Path = PROJECT_ROOT) -> InputSnap
                          tuple(facts))
 
 
+def previous_published_page(live_dir: Path) -> bytes | None:
+    """Find the latest verified page for this input directory across versions."""
+    source_dir = live_dir.parent
+    candidates = []
+    try:
+        versions = list(source_dir.iterdir())
+    except OSError:
+        return None
+    for version in versions:
+        if version == live_dir or not re.fullmatch(r"[0-9a-f]{64}", version.name):
+            continue
+        checkpoint = version / (FORECAST_PAGE_NAME + ".state.json")
+        try:
+            if version.resolve() != version or checkpoint.resolve() != checkpoint:
+                continue
+            candidates.append((checkpoint.stat().st_mtime_ns, checkpoint))
+        except OSError:
+            continue
+    for _, checkpoint in sorted(candidates, reverse=True):
+        page = checkpoint.with_name(FORECAST_PAGE_NAME)
+        try:
+            if page.resolve() != page:
+                continue
+            saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+            if not isinstance(saved, dict) or saved.get("schema_version") != 1:
+                continue
+            content = page.read_bytes()
+            if content and hashlib.sha256(content).hexdigest() == saved.get("revision"):
+                return content
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 class LiveMonitor:
     def __init__(self, scan: Callable[[], InputSnapshot], build: Callable[[], bytes],
                  clock=time.monotonic, scan_interval=300, stable_seconds=60,
@@ -75,6 +109,7 @@ class LiveMonitor:
         self._tick_lock = threading.Lock()
         self._content = None
         self._revision = ""
+        self._previous_result = False
         self._state = "starting"
         self._error = ""
         self._applied = None
@@ -82,10 +117,11 @@ class LiveMonitor:
         self._stable_since = 0.0
         self._next_scan = 0.0
 
-    def seed(self, content: bytes) -> None:
+    def seed(self, content: bytes, *, previous: bool = False) -> None:
         with self._lock:
             self._content = content
             self._revision = hashlib.sha256(content).hexdigest()
+            self._previous_result = previous
 
     @property
     def checkpoint_file(self) -> Path | None:
@@ -142,7 +178,8 @@ class LiveMonitor:
     def status(self) -> dict:
         with self._lock:
             return {"app": "sales-forecast-live", "state": self._state,
-                    "revision": self._revision, "error": self._error}
+                    "revision": self._revision, "error": self._error,
+                    "previous_result": self._previous_result}
 
     def _set_state(self, state: str, error: str = "") -> None:
         with self._lock:
@@ -293,13 +330,22 @@ class ForecastHandler(BaseHTTPRequestHandler):
             self._send(CLIENT_PATH.read_bytes(), "text/javascript; charset=utf-8", head=head)
         elif path in ("/", "/" + FORECAST_PAGE_NAME):
             content, revision = self.server.monitor.page()
+            status = self.server.monitor.status()
             if content is None:
-                waiting = ('<!doctype html><meta charset="utf-8"><title>销量预测</title>'
-                           '<script>setTimeout(()=>location.reload(),5000)</script>').encode("utf-8")
+                message = ("销量预测生成失败，后台将自动重试。" if status["state"] == "error"
+                           else "正在生成销量预测…")
+                waiting = (
+                    '<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
+                    '<meta name="viewport" content="width=device-width, initial-scale=1">'
+                    '<title>销量预测</title><body style="margin:24px;font:14px system-ui;color:#34435a">'
+                    f'<main role="status">{message}</main>'
+                    '<script>setTimeout(()=>location.reload(),5000)</script></body></html>'
+                ).encode("utf-8")
                 self._send(waiting, "text/html; charset=utf-8", status=200, head=head)
                 return
-            client = (f'<script src="{prefix}__forecast_live.js" data-revision="{revision}" defer></script>'
-                      ).encode("utf-8")
+            previous = ' data-previous-result="true"' if status["previous_result"] else ""
+            client = (f'<script src="{prefix}__forecast_live.js" data-revision="{revision}"'
+                      f'{previous} defer></script>').encode("utf-8")
             content = content.replace(b"</body>", client + b"</body>") if b"</body>" in content else content + client
             self._send(content, "text/html; charset=utf-8", head=head)
         elif self.server.asset_dir and re.fullmatch(r"/forecast_assets/raw-[0-9a-f]{64}\.js", path):

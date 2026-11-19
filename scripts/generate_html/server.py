@@ -20,7 +20,10 @@ from core.data_paths import (
     PROJECT_ROOT, assert_output_is_private, orders_input_directory,
     dynamic_output_directory, dynamic_log_directory, forecast_summary_path,
 )
-from core.live_server import ForecastServer, LiveMonitor, SUMMARY_REUSE_UNAVAILABLE, scan_inputs, normalize_prefix
+from core.live_server import (
+    ForecastServer, LiveMonitor, SUMMARY_REUSE_UNAVAILABLE, normalize_prefix,
+    previous_published_page, scan_inputs,
+)
 from core.release import runtime_revision
 from core.renderer import FORECAST_PAGE_NAME
 
@@ -81,7 +84,7 @@ def main() -> int:
     input_dir = args.input.resolve()
     source_key = hashlib.sha256(f"{input_dir}|{orders_input_directory(PROJECT_ROOT).resolve()}".encode("utf-8")).hexdigest()[:16]
     revision = runtime_revision(PROJECT_ROOT)
-    # External caches survive restart, but a new program version never serves old templates.
+    # Keep each version's generated page and startup checkpoint separate.
     live_dir = assert_output_is_private(output_root / source_key / revision)
     instance_id = hashlib.sha256(f"{PROJECT_ROOT}|{live_dir}|{args.public_prefix}".encode("utf-8")).hexdigest()
     monitor = LiveMonitor(lambda: scan_inputs(input_dir),
@@ -90,6 +93,11 @@ def main() -> int:
                           cache_files=(forecast_summary_path(PROJECT_ROOT),),
                           build_from_current_summary=lambda: build_page(input_dir, live_dir, reuse_summary_only=True))
     monitor.restore()
+    if monitor.page()[0] is None:
+        previous_page = previous_published_page(live_dir)
+        if previous_page is not None:
+            monitor.seed(previous_page, previous=True)
+            LOGGER.info("已载入上次成功生成的页面，当前版本将在后台生成")
     try:
         server = ForecastServer((args.host, args.port), monitor, live_dir / "forecast_assets", instance_id, args.public_prefix)
     except OSError:
