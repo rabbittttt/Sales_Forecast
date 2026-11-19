@@ -845,7 +845,7 @@
     $('#grainSelect').closest('.filter-group').hidden=false;
     $('#periodSelect').closest('label').hidden=false;
     $('#periodContext').hidden=true;
-    $("#filters").style.display="grid";
+    $("#filters").style.display=FORECAST_APP?"":"grid";
     $("#subjectSelect").closest("label").style.display="";
     $("#grainSelect").closest(".filter-group").style.display="";
     $("#periodSelect").closest("label").style.display="";

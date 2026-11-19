@@ -4953,3 +4953,61 @@ body.forecast-app .module-bar .module-nav :is(button, a) .module-icon { width: 1
 @media (max-width: 700px) {
   body.forecast-app .module-bar .module-nav :is(button, a) { padding-inline: 4px; }
 }
+
+/* Shared vertical rhythm of the embedded dashboards. */
+:root {
+  --toolbar-height: 64px;
+  --navigation-height: 56px;
+  --dashboard-gap: 16px;
+}
+@media (max-width: 640px) {
+  :root { --dashboard-gap: 12px; }
+}
+body.forecast-app .topbar {
+  height: var(--toolbar-height);
+  min-height: var(--toolbar-height);
+  padding-block: 0;
+  flex-wrap: nowrap;
+}
+body.forecast-app .topbar > .brand { flex: none; width: auto; }
+body.forecast-app .topbar .topbar-main { flex: 1 1 0; width: auto; }
+body.forecast-app .topbar .topbar-end {
+  overflow-x: auto;
+  align-items: center;
+  scrollbar-width: thin;
+}
+body.forecast-app .topbar .filters { flex: 0 0 auto; flex-wrap: nowrap; }
+body.forecast-app .topbar .filters > * { flex-shrink: 0; }
+body.forecast-app .module-bar {
+  height: var(--navigation-height);
+  padding-block: 0;
+  display: flex;
+  align-items: center;
+}
+body.forecast-app .module-bar .module-nav {
+  display: flex;
+  width: 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+body.forecast-app .module-bar .module-nav button { flex: none; }
+body.forecast-app .workspace:has(#page) { padding-top: var(--dashboard-gap); }
+@media (max-width: 700px) {
+  body.forecast-app .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 2px;
+  }
+  body.forecast-app .topbar > .brand { height: 28px; align-self: flex-start; }
+  body.forecast-app .topbar .brand strong { line-height: 1.15; }
+  body.forecast-app .topbar .brand-mark { width: 24px; height: 24px; flex-basis: 24px; }
+  body.forecast-app .topbar .topbar-main { flex: none; margin: 0; }
+  body.forecast-app .topbar .filters,
+  body.forecast-app .topbar .filters[data-mode=window] { flex: none; flex-wrap: nowrap; width: max-content; }
+  body.forecast-app .topbar .filters label:first-child,
+  body.forecast-app .topbar .filters .period-field { flex: none; width: auto; max-width: 55vw; }
+  body.forecast-app .topbar .filters select { height: 32px; padding-block: 0; }
+  body.forecast-app .module-bar .module-nav button { padding-inline: 12px; }
+}
