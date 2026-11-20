@@ -5021,3 +5021,148 @@ body.forecast-app .workspace:has(#page) { padding-top: var(--dashboard-gap); }
 body.forecast-app .topbar .brand, .module-nav :is(button, a), .forecast-target-tabs button, .forecast-tabs button, .forecast-lifecycle-subtabs button {
   font-family: "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei UI", sans-serif;
 }
+
+/* Forecast parameters share the stage navigation row. */
+body.forecast-app .module-bar:has(> #forecastNavParameters:not([hidden])) {
+  position: relative;
+  z-index: 3;
+  column-gap: 12px;
+}
+body.forecast-app .module-bar:has(> #forecastNavParameters:not([hidden])) .module-nav {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+}
+body.forecast-app #forecastNavParameters {
+  flex: none;
+  min-width: 0;
+  margin-inline-start: auto;
+}
+body.forecast-app #forecastNavParameters > summary {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  cursor: pointer;
+  font: 600 13px/1.4 var(--ui-font);
+  white-space: nowrap;
+}
+body.forecast-app #forecastNavParameters[open] > summary {
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+}
+body.forecast-app #forecastNavParameters .forecast-target-settings {
+  position: absolute;
+  top: 100%;
+  inset-inline-end: var(--navigation-gutter);
+  width: min(480px, calc(100% - 2 * var(--navigation-gutter)));
+  max-height: calc(100dvh - var(--toolbar-height) - var(--navigation-height) - 12px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-md);
+}
+body.forecast-app #forecastNavParameters .forecast-target-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 10px;
+}
+body.forecast-app #forecastNavParameters label {
+  color: var(--muted);
+  font-size: var(--type-note);
+  white-space: nowrap;
+}
+body.forecast-app #forecastNavParameters :is(input, select) {
+  min-height: 38px;
+  padding: 4px 6px;
+  border-color: var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--surface-muted);
+  font: 500 13px/1.3 var(--ui-font);
+}
+body.forecast-app #forecastNavParameters :is(input, select):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+body.forecast-app #forecastNavParameters :disabled {
+  opacity: .6;
+}
+body.forecast-app #forecastNavParameters input[type=number] {
+  padding-inline-end: 18px;
+}
+body.forecast-app #forecastNavParameters label > small {
+  right: 6px;
+  bottom: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+body.forecast-app .forecast-workspace.forecast-studio .forecast-target:not(:has(> .forecast-target-settings)) {
+  display: flex;
+  flex-flow: row wrap;
+  gap: 6px 12px;
+  padding: 7px 12px;
+}
+body.forecast-app .forecast-workspace.forecast-studio .forecast-target-heading {
+  flex: 0 1 auto;
+}
+body.forecast-app .forecast-workspace.forecast-studio .forecast-target > .forecast-status {
+  margin: 0;
+}
+body.forecast-app .forecast-workspace.forecast-studio .forecast-target-meta {
+  flex: 1 1 560px;
+  padding: 0;
+  border-top: 0;
+}
+
+@media (min-width: 1280px) {
+  body.forecast-app #forecastNavParameters {
+    flex: 1 1 0;
+    max-width: 1300px;
+  }
+  body.forecast-app #forecastNavParameters > summary { display: none; }
+  body.forecast-app #forecastNavParameters .forecast-target-settings {
+    position: static;
+    width: auto;
+    max-height: none;
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+  }
+  body.forecast-app #forecastNavParameters .forecast-target-form {
+    grid-template-columns: minmax(78px, 1.05fr) minmax(72px, .9fr) minmax(72px, .9fr)
+      minmax(112px, 1.3fr) minmax(90px, 1.1fr) minmax(48px, .65fr)
+      minmax(112px, 1.3fr) minmax(90px, 1.1fr) minmax(48px, .65fr) !important;
+    gap: 6px;
+  }
+  body.forecast-app #forecastNavParameters :is(input, select) {
+    height: 30px;
+    min-height: 30px;
+    font-size: 12px;
+  }
+  body.forecast-app #forecastNavParameters label > small { bottom: 7px; }
+}
+@media (max-width: 700px) {
+  body.forecast-app .module-bar:has(> #forecastNavParameters:not([hidden])) {
+    gap: 4px;
+  }
+  body.forecast-app .module-bar:has(> #forecastNavParameters:not([hidden])) .module-nav button {
+    gap: 4px;
+    padding-inline: 4px;
+  }
+  body.forecast-app #forecastNavParameters > summary { padding: 10px 7px; }
+  body.forecast-app #forecastNavParameters > summary span { display: none; }
+  body.forecast-app #forecastNavParameters .forecast-target-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  body.forecast-app #forecastNavParameters :is(input, select) { min-height: 42px; }
+  body.forecast-app #forecastNavParameters label > small { bottom: 13px; }
+}
+@media (max-width: 380px) {
+  body.forecast-app .module-bar:has(> #forecastNavParameters:not([hidden])) .module-nav button .module-icon {
+    display: none;
+  }
+}

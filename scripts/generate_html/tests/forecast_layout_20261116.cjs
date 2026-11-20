@@ -57,6 +57,68 @@ const screenshot = (page, name) => page.screenshot({path: path.join(output, name
     await draftPage.waitForFunction(() => document.querySelector('[data-forecast-input="conversion"]').value === '25' && document.querySelector('.forecast-workspace')._forecastComparison.scenarios.parameter.gross === 5000);
     assert.equal(await draftPage.locator('[data-forecast-target="launchDate"]').inputValue(), '2080-01-01');
     report.checks.push('legacy params URL redirects to evidence; parameters recalculate and manual draft survives reload');
+    const navigation = draftPage.locator('#forecastNavParameters');
+    const targetInputs = navigation.locator('[data-forecast-target]');
+    const expectedFields = ['tier', 'energy', 'node', 'smallStartDate', 'smallPeriod', 'smallDays', 'launchDate', 'period', 'days'].sort();
+    const fieldNames = () => targetInputs.evaluateAll(inputs => inputs.map(input => input.dataset.forecastTarget).sort());
+    assert.deepEqual(await fieldNames(), expectedFields);
+    assert.equal(await draftPage.locator('[data-forecast-target]').count(), expectedFields.length);
+    const wideLayout = await navigation.evaluate(menu => {
+      const stage = document.querySelector('#moduleNav button:last-child').getBoundingClientRect();
+      const controls = [...menu.querySelectorAll('[data-forecast-target]')].map(input => input.getBoundingClientRect());
+      return menu.open && controls.every(box =>
+        box.width > 0 && box.left >= stage.right && box.right <= innerWidth &&
+        box.top < stage.bottom && box.bottom > stage.top);
+    });
+    assert(wideLayout, 'All nine fields share the stage navigation row on a wide screen');
+
+    const days = navigation.locator('[data-forecast-target="days"]');
+    const changedDays = (await days.inputValue()) === '5' ? '6' : '5';
+    await days.fill(changedDays);
+    await days.dispatchEvent('change');
+    await draftPage.waitForFunction(value => document.querySelector('[data-forecast-time-summary]').textContent.includes('共' + value + '天'), changedDays);
+    await draftPage.reload();
+    await ready(draftPage);
+    assert.equal(await days.inputValue(), changedDays);
+    const subject = draftPage.locator('#subjectSelect');
+    const firstModel = await subject.inputValue();
+    const nextModel = await subject.evaluate(select => [...select.options].find(option => option.value !== select.value)?.value);
+    assert(nextModel, 'Model switching requires a second forecast model');
+    for (const id of [nextModel, firstModel]) {
+      await subject.selectOption(id);
+      await draftPage.waitForFunction(id => document.querySelector('.forecast-workspace')?._forecastSubjectId.split('|')[0] === id &&
+        document.querySelector('#page').getAttribute('aria-busy') === 'false', id);
+      const launchDate = navigation.locator('[data-forecast-target="launchDate"]');
+      if (id === firstModel) {
+        assert.equal(await days.inputValue(), changedDays);
+        assert.equal(await launchDate.inputValue(), '2080-01-01');
+      } else {
+        const target = JSON.parse(await draftPage.locator('.forecast-workspace').getAttribute('data-forecast-config')).target;
+        assert.equal(await launchDate.inputValue(), target.launch_date || '');
+      }
+    }
+    for (const stage of ['small', 'steady', 'launch']) {
+      const stageButton = draftPage.locator('[data-forecast-nav="' + stage + '"]');
+      await stageButton.click();
+      await draftPage.waitForFunction(id => document.querySelector('[data-forecast-nav="' + id + '"]')?.getAttribute('aria-current') === 'page', stage);
+      assert.deepEqual(await fieldNames(), expectedFields);
+      assert.equal(await draftPage.locator('[data-forecast-target]').count(), expectedFields.length);
+    }
+    for (const width of [1024, 390]) {
+      await draftPage.setViewportSize({width, height: 850});
+      const summary = navigation.locator('summary');
+      await summary.waitFor({state: 'visible'});
+      assert.equal(await navigation.evaluate(menu => menu.open), false);
+      await summary.click();
+      assert(await days.isVisible());
+      assert(await targetInputs.evaluateAll(inputs => inputs.every(input => {
+        const box = input.getBoundingClientRect();
+        return box.width > 0 && box.left >= 0 && box.right <= innerWidth + 1;
+      })), width + 'px: fields are usable within the viewport');
+      await days.press('Escape');
+      assert.equal(await navigation.evaluate(menu => menu.open), false);
+    }
+    report.checks.push('navigation owns nine unique fields; model drafts, stage changes, compact menu and time calculations work');
     await draftContext.close();
 
     // A fresh browser context uses the real, untouched launch data for both methods.

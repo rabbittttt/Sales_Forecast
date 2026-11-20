@@ -18,7 +18,7 @@ const values=page=>page.evaluate(()=>{const r=document.querySelector('.forecast-
   let page=await context.newPage();page.on('pageerror',e=>report.errors.push(e.message));
   await page.goto(url.href);await ready(page);
   const original=await values(page),defaultConversion=await page.locator('[data-forecast-input="conversion"]').inputValue();
-  check('车型时间参数不是折叠组件',await page.locator('.forecast-target-settings').evaluate(n=>n.tagName==='DIV'&&!n.querySelector('summary')));
+  check('宽屏顶部导航直接展示车型时间参数',await page.locator('#forecastNavParameters[open] .forecast-target-settings').isVisible());
   const enter=async(selector,value)=>{await page.locator('[data-forecast-tab="evidence"]').click();await page.locator(selector).fill(value);await page.locator(selector).dispatchEvent('change');await page.waitForFunction(()=>document.querySelector('[data-forecast-feedback]').dataset.state==='success');};
   await enter('[data-forecast-input="conversion"]','41.2');
   await enter('[data-bridge-stage="launch"] [data-bridge-control="holiday"]','1.8');
@@ -138,20 +138,29 @@ const values=page=>page.evaluate(()=>{const r=document.querySelector('.forecast-
   page.once('dialog',d=>d.accept());await page.locator('[data-forecast-reset]').click();await page.waitForFunction(v=>document.querySelector('[data-forecast-input="conversion"]')?.value===v,defaultConversion);
   await page.waitForFunction(()=>!document.querySelector('#toast').classList.contains('show'));
   await page.locator('[data-forecast-stage-switch="launch"]').click();
-  for(const width of [1440,1024,768,390]){
+  const menu=page.locator('#forecastNavParameters');
+  async function inspectParametersAt(width){
+   const previousWidth=page.viewportSize().width;
    await page.setViewportSize({width,height:900});
+   if(width<1280){
+    if(previousWidth>=1280)await page.waitForFunction(()=>!document.querySelector('#forecastNavParameters').open);
+    if(!await menu.evaluate(node=>node.open))await menu.locator('summary').click();
+   }
+   await menu.locator('.forecast-target-form').waitFor({state:'visible'});
+  }
+  for(const width of [1440,1024,768,390]){
+   await inspectParametersAt(width);
    const layout=await page.evaluate(()=>({width:innerWidth,pageWidth:document.documentElement.scrollWidth,scoreBottom:document.querySelector('[data-forecast-tab="score"]').getBoundingClientRect().bottom,targetHeight:document.querySelector('.forecast-target').getBoundingClientRect().height,
-    fields:[...document.querySelectorAll('[data-forecast-target]')].map(n=>({key:n.dataset.forecastTarget,width:n.getBoundingClientRect().width,height:n.getBoundingClientRect().height,left:n.getBoundingClientRect().left,right:n.getBoundingClientRect().right}))}));
-   report.layout.push(layout);check(width+'px全部9项参数直接可见',layout.fields.length===9&&layout.fields.every(f=>f.width>0&&f.height>0&&f.left>=0&&f.right<=width+1));
+    fields:[...document.querySelectorAll('#forecastNavParameters [data-forecast-target]')].map(n=>({key:n.dataset.forecastTarget,width:n.getBoundingClientRect().width,height:n.getBoundingClientRect().height,left:n.getBoundingClientRect().left,right:n.getBoundingClientRect().right}))}));
+   report.layout.push(layout);check(width+'px导航参数组含9个可见控件',layout.fields.length===9&&layout.fields.every(f=>f.width>0&&f.height>0&&f.left>=0&&f.right<=width+1));
    check(width+'px无整页横向溢出',layout.pageWidth<=width+1);
-   // Nine always-visible fields now include separate launch periods and small-order days.
    const limits={1440:160,1024:260,768:340,390:490};
-   check(width+'px九项参数区域保持紧凑',layout.targetHeight<=limits[width]+1&&layout.scoreBottom<750);
+   check(width+'px预测正文页头保持紧凑',layout.targetHeight<=limits[width]+1&&layout.scoreBottom<750);
    await page.screenshot({path:path.join(out,'forecast-'+width+'.png')});
   }
   for(const width of [1280,1180,1100,1030,1001,1000,900,820,640,600,360]){
-   await page.setViewportSize({width,height:900});
-   check(width+'px断点附近日期有足够显示宽度',await page.locator('.forecast-target input[type=date]').evaluateAll(inputs=>inputs.every(n=>n.clientWidth>=108)));
+   await inspectParametersAt(width);
+   check(width+'px断点附近日期有足够显示宽度',await menu.locator('input[type=date]').evaluateAll(inputs=>inputs.length===2&&inputs.every(n=>n.clientWidth>=108)));
    check(width+'px断点附近无整页溢出',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
   }
   await page.evaluate(()=>localStorage.setItem('sales-forecast-independent-v1:'+location.pathname,'{broken'));
