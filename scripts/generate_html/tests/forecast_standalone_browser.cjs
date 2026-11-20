@@ -11,6 +11,50 @@ const target='问界 M9 2026款',report={checks:[],errors:[],layout:[]};
 const check=(name,value)=>{assert(value,name);report.checks.push(name);console.log('PASS',name);};
 const ready=page=>page.waitForFunction(()=>document.querySelector('.forecast-workspace')?._forecastComparison);
 const settled=page=>page.waitForFunction(()=>document.querySelector('#page')?.getAttribute('aria-busy')==='false');
+async function checkSubjectPreference(context, entry) {
+  async function open(page, requested) {
+    const link = new URL(entry);
+    if (requested) link.searchParams.set('subject', requested);
+    await page.goto(link.href);
+    await settled(page);
+    return page.locator('#subjectSelect').inputValue();
+  }
+  const protocol = new URL(entry).protocol;
+  const first = await context.newPage();
+  first.on('pageerror', error => report.errors.push(error.message));
+  const defaultId = await open(first);
+  const choice = await first.locator('#subjectSelect').evaluate(select =>
+    [...select.options].find(option => !option.disabled && option.value !== select.value)?.value);
+  assert(choice, '代际记忆测试需要至少两个可选代际');
+  await first.locator('#subjectSelect').selectOption(choice);
+  await first.waitForURL(link => link.searchParams.get('subject') === choice);
+  await first.reload();
+  await settled(first);
+  check(protocol + ' 刷新后保留手选代际', await first.locator('#subjectSelect').inputValue() === choice);
+  await first.close();
+
+  const next = await context.newPage();
+  next.on('pageerror', error => report.errors.push(error.message));
+  try {
+    check(protocol + ' 关闭后从无参数入口重开可恢复代际', await open(next) === choice);
+    check(protocol + ' 指定代际的链接优先', await open(next, defaultId) === defaultId);
+    check(protocol + ' 打开指定链接不会覆盖手选偏好', await open(next) === choice);
+    check(protocol + ' 已失效的链接代际回退到手选代际', await open(next, 'removed-generation') === choice);
+    if (protocol === 'http:') {
+      const key = await next.evaluate(() => 'sales-forecast-independent-v1:' + location.pathname + ':last-subject');
+      const alias = await next.evaluate(() => Object.entries(window.DASHBOARD_DATA.forecast_subject_aliases || {})
+        .find(([old, current]) => old !== current && [...document.querySelector('#subjectSelect').options].some(option => option.value === current)));
+      if (alias) {
+        await next.evaluate(([key, value]) => localStorage.setItem(key, value), [key, alias[0]]);
+        check('已改名的代际记忆恢复为现有代际', await open(next) === alias[1]);
+      }
+      await next.evaluate(key => localStorage.setItem(key, 'removed-generation'), key);
+      check('已移除的代际记忆回退到首次进入时的默认代际', await open(next) === defaultId);
+    }
+  } finally {
+    await next.close();
+  }
+}
 async function run(){
   const requests=[];
   const server=http.createServer((req,res)=>{
@@ -117,6 +161,8 @@ async function run(){
     const fileUrl=pathToFileURL(path.join(output,forecastName));fileUrl.search=new URLSearchParams(forecastParams);
     await filePage.goto(fileUrl.href);await ready(filePage);
     check('单文件预测入口可打开',await filePage.locator('.forecast-workspace').isVisible());
+    await checkSubjectPreference(context, url(forecastName));
+    await checkSubjectPreference(context, pathToFileURL(path.join(output, forecastName)).href);
     assert.deepEqual(report.errors,[]);check('浏览器无脚本异常',true);
     console.log(JSON.stringify({passed:true,checks:report.checks.length,layout:report.layout,pageErrors:report.errors},null,2));
     await context.close();

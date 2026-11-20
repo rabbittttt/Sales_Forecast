@@ -63,11 +63,11 @@ console.log(JSON.stringify(state));
 
     def test_obsolete_subject_handler_does_not_redraw_or_lose_new_edits(self):
         result = self.run_js(r'''
-const control={},draws=[];let editor='';
-const line=source.split('\n').find(line=>line.includes('$("#subjectSelect").onchange='));
-new Function('$','captureForecastDraft','state','ensureState','renderAll','syncUrl',line)(
- ()=>control,()=>{},state,ensure,async()=>{draws.push(state.subject);editor='default';},()=>{});
-const old=control.onchange({target:{value:'A'}}),latest=control.onchange({target:{value:'B'}});
+const draws=[];let editor='';
+const select=new Function('captureForecastDraft','state','ensureState','renderAll','syncUrl','FORECAST_APP',
+ extract('  async function selectSubject(', '  async function init()')+';return selectSubject;')(
+ ()=>{},state,ensure,async()=>{draws.push(state.subject);editor='default';},()=>{},false);
+const old=select('A'),latest=select('B');
 pending[1](board('week','26WK43'));await latest;editor='new user input';
 pending[0](board('day','2025-05-01'));await old;
 console.log(JSON.stringify({draws,editor}));
@@ -81,9 +81,9 @@ const $=selector=>{if(!elements.has(selector))elements.set(selector,{
  dataset:{},style:{},hidden:false,innerHTML:'',value:'',closest(){return this;}
 });return elements.get(selector)};
 const DATA={config:{grain_labels:{day:'日',week:'周',month:'月'}}};
-const render=new Function('state','$','DATA','getDashboard','sortPeriods','esc',
+const render=new Function('state','$','DATA','getDashboard','sortPeriods','esc','FORECAST_APP',
  extract('  async function renderFilters()','  function alignOverviewChartScrollbars()')+';return renderFilters;')(
- state,$,DATA,getDashboard,p=>p,String);
+ state,$,DATA,getDashboard,p=>p,String,false);
 const old=render();state.subject='B';state.period='26WK43';const latest=render();
 pending[1](board('week','26WK43'));await latest;
 pending[0](board('day','2025-05-01'));await old;
