@@ -3173,10 +3173,6 @@ button:focus-visible,select:focus-visible,input:focus-visible {
 /* 销量预测 V2：发布类型与发布时点分开，监控与周汇总使用统一组件 */
 .forecast-v2 .forecast-target-form{grid-template-columns:minmax(170px,1.25fr) repeat(7,minmax(92px,.72fr))}
 .forecast-chart-legend .line-key.dotted{border-top-style:dashed}
-.forecast-monitor-status{margin:10px 0 0;padding:9px 11px;border:1px solid #CFE2F5;border-radius:9px;background:#F4FAFF;color:#46647E;font-size:var(--type-note);line-height:1.6}
-.forecast-monitor-status b{color:#1269DB}
-.forecast-monitor-status.warn{border-color:#FFD18A;background:#FFF9EC;color:#855400}
-.forecast-monitor-status.warn b{color:#B55D00}
 .forecast-weekly{margin-top:10px;border:1px solid #DCE9F5;border-radius:10px;background:#FBFDFF}
 .forecast-weekly summary{padding:10px 12px;color:#315677;font-size:var(--type-note);font-weight:700;cursor:pointer}
 .forecast-weekly>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;padding:0 10px 10px}
@@ -3422,7 +3418,6 @@ button:focus-visible,select:focus-visible,input:focus-visible {
 .forecast-workspace.forecast-v2 .forecast-pane-head small,.forecast-workspace.forecast-v2 .forecast-pane-head>span{font-size:var(--type-note)}
 .forecast-decision-card .forecast-svg-scroll svg{height:280px}
 .forecast-decision-card .forecast-svg-scroll{width:100%;max-width:100%;overflow-x:hidden}.forecast-decision-card .forecast-decision-svg{width:100%;max-width:100%;min-width:0}
-.forecast-monitor-status{font-size:var(--type-note)}
 .forecast-weekly summary{font-size:var(--type-note)}
 .forecast-scale-formula{font-size:var(--type-note)}
 .forecast-scale-summary span,.forecast-scale-summary small{font-size:var(--type-note)}
