@@ -1102,7 +1102,7 @@ button {
   --muted-2:#696f7d;
   --line:#e5e7ed;
   --line-strong:#d7dbe4;
-  --page:#f3f4f6;
+  --page:#f0f2f5;
   --card:#fff;
   --shadow-sm:0 1px 2px rgba(11,13,23,.04);
   --shadow-md:0 8px 24px rgba(11,13,23,.08);
@@ -4180,7 +4180,7 @@ button:focus-visible,select:focus-visible,input:focus-visible {
 .forecast-workspace.forecast-studio .forecast-target-settings{flex:1 1 780px}
 .forecast-workspace.forecast-studio .forecast-target-form label{font-size:var(--type-note);color:var(--ink-2);gap:4px}
 .forecast-workspace.forecast-studio .forecast-target-form input,
-.forecast-workspace.forecast-studio .forecast-target-form select{background:var(--page);border-color:var(--line);border-radius:8px;font-size:12px;min-height:34px}
+.forecast-workspace.forecast-studio .forecast-target-form select{background:var(--card);border-color:var(--line-strong);border-radius:999px;font-size:12px;min-height:34px}
 .forecast-workspace.forecast-studio .forecast-status{padding:4px 8px;border-radius:8px;box-shadow:none}
 .forecast-workspace.forecast-studio .forecast-target-meta{flex-basis:100%;padding-top:8px;border-top:1px solid var(--line);gap:8px 14px}
 .forecast-workspace.forecast-studio .forecast-stage-switcher{padding:0;gap:4px;border:0;background:transparent;border-radius:0}
@@ -4627,7 +4627,7 @@ body.forecast-app .forecast-workspace.forecast-studio .forecast-scroll-body {hei
 body.forecast-app .forecast-workspace.forecast-studio .forecast-pane.active,
 body.forecast-app .forecast-workspace.forecast-studio .forecast-lifecycle-subpane.active {max-height:none;overflow:visible;padding-right:0}
 /* Keep the existing model/date inputs visible in the compact workspace header. */
-body.forecast-app .forecast-workspace.forecast-studio .forecast-target {display:grid;grid-template-columns:minmax(128px,150px) minmax(0,1fr) auto;align-items:center;gap:8px 10px;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:none}
+body.forecast-app .forecast-workspace.forecast-studio .forecast-target {display:grid;grid-template-columns:minmax(128px,150px) minmax(0,1fr) auto;align-items:center;gap:10px 12px;padding:14px 16px;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:none}
 body.forecast-app .forecast-workspace.forecast-studio .forecast-target-heading {display:flex;grid-column:1;grid-row:1;flex-direction:column;justify-content:center;align-items:flex-start;gap:1px;min-width:0;max-width:none;align-self:center;flex:auto;padding:0;background:none}
 body.forecast-app .forecast-workspace.forecast-studio .forecast-target-heading small {font-size:var(--type-note);line-height:1.4;letter-spacing:0}
 body.forecast-app .forecast-workspace.forecast-studio .forecast-target-heading h3 {margin:1px 0 0;font-size:17px;line-height:1.35;white-space:normal;overflow-wrap:anywhere}
@@ -4867,6 +4867,9 @@ body.forecast-app .forecast-workspace.forecast-studio .forecast-scenario-head>sp
 body.forecast-app .forecast-workspace.forecast-studio .forecast-scenario-meta {background:var(--surface-muted)}
 body.forecast-app .forecast-workspace.forecast-studio .forecast-metric.primary strong {font-size:clamp(25px,2.25vw,32px)}
 body.forecast-app .forecast-workspace.forecast-studio .forecast-decision-card {padding:16px}
+body.forecast-app .forecast-workspace.forecast-studio .forecast-metric-strip {gap:10px}
+body.forecast-app .forecast-workspace.forecast-studio .forecast-metric {padding:12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--card)}
+body.forecast-app .forecast-workspace.forecast-studio .forecast-metric.primary {border-color:var(--line-strong)}
 @media(max-width:700px) {
   body.forecast-app .module-bar {padding-inline:10px}
   body.forecast-app .module-bar .module-nav {
