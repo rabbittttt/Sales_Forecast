@@ -95,6 +95,19 @@ class StandaloneForecastTests(TestCase):
             for key in ("order_page", "forecast_legacy_page", "forecast_page"):
                 self.assertNotIn(key, meta)
 
+    def test_inline_payload_keys_round_trip_html_and_template_markers(self):
+        fixture = self.fixture()
+        key = "</ScRiPt>__DASHBOARD_JS__"
+        fixture["raw_blocks"] = {key: "__BRAND_LOGO__"}
+        fixture["dashboards"] = {key: {}}
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / FORECAST_PAGE_NAME
+            render_dashboard(fixture, generator.ROOT / "templates", output)
+            self.assertNotIn("</ScRiPt>", output.read_text(encoding="utf-8"))
+            _, boards, raw = embedded(output)
+            self.assertEqual(list(boards), [key])
+            self.assertEqual(raw, fixture["raw_blocks"])
+
     def test_resources_are_immutable_and_new_build_does_not_invalidate_old_page(self):
         with TemporaryDirectory() as directory:
             output = Path(directory) / FORECAST_PAGE_NAME

@@ -386,7 +386,10 @@
       for(const [key,value] of imports)importedForecastRows.set(key,value);
       for(const [key,value] of scopes)forecastImportScopes.set(key,value);
       if(migrated)persistForecastState();
-    }catch(error){forecastStorageWarning='本机保存内容不可读取，已使用系统默认值；原保存内容未删除。'}
+    }catch(error){
+      if(error instanceof ReferenceError || error instanceof TypeError)console.debug('[销量预测] 读取本机草稿失败',error);
+      forecastStorageWarning='本机保存内容不可读取，已使用系统默认值；原保存内容未删除。';
+    }
   }
   loadForecastState();
   window.addEventListener('pagehide',()=>captureForecastDraft());

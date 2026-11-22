@@ -109,14 +109,11 @@ console.log(JSON.stringify({status,total:node('[data-small-kpi="total"]').textCo
         script = r"""
 const fs=require('fs'),assert=require('assert');
 const source=fs.readFileSync(DASHBOARD,'utf8');
-const start=source.indexOf('  function persistForecastState(){');
+const start=source.indexOf('  const forecastStages=');
 const end=source.indexOf('  loadForecastState();',start);
 assert(start>=0&&end>start,'production state loader must be found');
 const load=new Function('location','localStorage','FORECAST_APP',`
-  const DATA={},forecastStages=[{id:'small'},{id:'launch'},{id:'steady'}];
-  const forecastStorageKey='sales-forecast-independent-v1:'+location.pathname;
-  const forecastDrafts=new Map(),importedForecastRows=new Map(),forecastImportScopes=new Map();
-  let forecastStorageWarning='';
+  const DATA={};
   ${source.slice(start,end)}
   loadForecastState();
   return {drafts:[...forecastDrafts],imports:[...importedForecastRows],

@@ -1131,9 +1131,11 @@ def build_secondary(source: Path, output: Path, mapping_path: Path, orders_dir: 
     LOGGER.info("刷新完成：%s（%d个传播名、%d天、%d个Sheet）", output, len(models), day_count, sheet_count)
 
 
+ORDER_FILE_KEYWORDS = ("首销期订单节奏", "小订退订分析", "小订选配比例", "锁单选配比例", "大定选配比例")
+
+
 def forecast_order_files(directory: Path) -> list[Path]:
-    keywords = ("首销期订单节奏", "小订退订分析", "小订选配比例", "锁单选配比例", "大定选配比例")
-    return sorted(path for path in directory.glob("*.xlsx") if not path.name.startswith("~$") and any(key in path.name for key in keywords))
+    return sorted(path for path in directory.glob("*.xlsx") if not path.name.startswith("~$") and any(key in path.name for key in ORDER_FILE_KEYWORDS))
 
 
 def fit_summary_columns(sheet):
@@ -1878,12 +1880,13 @@ def resolve_source_path(requested: Path) -> Path:
         return requested
     candidates = [
         path for path in requested.parent.glob("*.xlsx")
-        if not path.name.startswith("~$")
+        if path.is_file() and not path.name.startswith("~$")
+        and not any(marker in path.name for marker in ("副本", "修正前", *ORDER_FILE_KEYWORDS))
         and "二次处理" not in path.name
         and "映射" not in path.name
         and ("小订" in path.name or "首销" in path.name)
     ]
-    preferred = [path for path in candidates if "数据整理" in path.name and "副本" not in path.name and "修正前" not in path.name]
+    preferred = [path for path in candidates if "数据整理" in path.name]
     pool = preferred or candidates
     if len(pool) == 1:
         LOGGER.info("[来源选择] 默认原始文件名不存在，使用同目录唯一候选：%s", pool[0].name)

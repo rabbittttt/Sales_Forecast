@@ -818,7 +818,8 @@ class ForcedSummaryRefreshTests(TestCase):
             self.assertIn("--force-refresh", run.call_args_list[1].args[0])
             self.assertNotIn("--reuse-summary-only", run.call_args_list[1].args[0])
 
-            # Even with an old staging page, the unavailable code must enter the wait.
+            self.assertEqual(list(live_dir.glob(".build-*")), [])
+            # An unavailable summary must enter the wait.
             with patch.object(entry.subprocess, "run", return_value=SimpleNamespace(returncode=3)):
                 self.assertIsNone(entry.build_page(root / "orders", live_dir, reuse_summary_only=True))
                 with self.assertRaises(RuntimeError):
@@ -826,6 +827,7 @@ class ForcedSummaryRefreshTests(TestCase):
             with patch.object(entry.subprocess, "run", return_value=SimpleNamespace(returncode=1)):
                 with self.assertRaises(RuntimeError):
                     entry.build_page(root / "orders", live_dir, reuse_summary_only=True)
+            self.assertEqual(list(live_dir.glob(".build-*")), [])
 
 
 class StartupReuseTests(TestCase):

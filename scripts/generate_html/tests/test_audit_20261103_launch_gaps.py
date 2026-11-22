@@ -105,7 +105,8 @@ console.log(JSON.stringify({known,actualLockRate:adapted.actualLockRate,charts:c
         self.assertEqual(self.chart(result,'基础曲线')['series'][0]['values'],[1,2,3])
         self.assertEqual(self.chart(result,'每日斜率')['series'][0]['values'],[None,1,.5])
         self.assertIn('<strong>600</strong>',result['weekly'])
-        self.assertIn('期末累计600',result['weekly'])
+        self.assertIn('<small>周大定</small>',result['weekly'])
+        self.assertIn('全部真实',result['weekly'])
 
     def test_actual_lock_rate_requires_complete_same_period_observations(self):
         self.assertIsNone(self.run_case([self.row(0,100),self.row(2,300)])['actualLockRate'])

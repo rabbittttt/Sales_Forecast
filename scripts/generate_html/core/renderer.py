@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 from time import perf_counter
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -37,6 +38,7 @@ def forecast_manifest(manifest: dict[str, Any], *, forecast_disabled: bool = Fal
                      for subject in manifest.get("subjects", [])],
         "dashboards": boards,
         "chart_assets": {},
+        # Independent forecasts deliberately omit the generic renderer's workbook exports.
         "raw_files": [],
         "raw_blocks": {},
         "raw_block_urls": {},
@@ -169,17 +171,16 @@ def render_dashboard(manifest: dict[str, Any], template_dir: Path, output_file: 
         if key not in ("raw_blocks", "dashboards")
     }
     main_payload = b64gzip(json.dumps(main_manifest, ensure_ascii=False, separators=(",", ":")))
-    raw_payload = json.dumps(raw_blocks, ensure_ascii=False, separators=(",", ":"))
-    board_payload = json.dumps(dashboard_blocks, separators=(",", ":"))
+    # Escape HTML tag openers in JSON keys as well as values inside script elements.
+    raw_payload = json.dumps(raw_blocks, ensure_ascii=False, separators=(",", ":")).replace("<", r"\u003c")
+    board_payload = json.dumps(dashboard_blocks, separators=(",", ":")).replace("<", r"\u003c")
     title = FORECAST_PAGE_TITLE if manifest.get("app_mode") == "forecast" else "鸿蒙智行订单分析汇总"
-    html = html.replace("__DASHBOARD_TITLE__", title)
-    html = html.replace("__DASHBOARD_CSS__", css)
-    html = html.replace("__DASHBOARD_DATA__", main_payload)
-    html = html.replace("__DASHBOARD_RAW__", raw_payload)
-    html = html.replace("__DASHBOARD_BLOCKS__", board_payload)
-    html = html.replace("__DASHBOARD_JS__", javascript)
-    html = html.replace("__BRAND_LOGO__", icon_url)
-    html = html.replace("__FAVICON__", icon_url)
+    replacements = {
+        "__DASHBOARD_TITLE__": title, "__DASHBOARD_CSS__": css, "__DASHBOARD_DATA__": main_payload,
+        "__DASHBOARD_RAW__": raw_payload, "__DASHBOARD_BLOCKS__": board_payload,
+        "__DASHBOARD_JS__": javascript, "__BRAND_LOGO__": icon_url, "__FAVICON__": icon_url,
+    }
+    html = re.sub("|".join(replacements), lambda match: replacements[match[0]], html)
     # Write on the same volume, and close before replacing (Windows). A disk
     # write/replace failure must not truncate the previous usable dashboard.
     _write_text_atomic(output_file, html)

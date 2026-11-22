@@ -16,6 +16,25 @@ from core.data_paths import (
 
 
 class SharedDataPathsTests(TestCase):
+    def test_source_candidates_exclude_backups_and_require_an_unambiguous_choice(self):
+        from tools.refresh_sales_forecast_data import resolve_source_path
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            requested = root / "小订及首销数据整理.xlsx"
+            for name in ("首销期订单节奏.xlsx", "小订数据整理副本.xlsx", "首销数据整理修正前.xlsx", "~$小订数据整理.xlsx"):
+                (root / name).touch()
+            with self.assertRaises(FileNotFoundError):
+                resolve_source_path(requested)
+            candidate = root / "新版小订数据整理.xlsx"
+            candidate.touch()
+            self.assertEqual(resolve_source_path(requested), candidate)
+            (root / "另一个首销数据整理.xlsx").touch()
+            with self.assertRaises(FileNotFoundError):
+                resolve_source_path(requested)
+            requested.touch()
+            self.assertEqual(resolve_source_path(requested), requested)
+
     def test_standalone_project_requires_shared_inputs_even_when_missing(self):
         with TemporaryDirectory() as folder, patch.dict(os.environ, {"SHARED_DATA_ROOT": ""}):
             project = Path(folder) / "销量预测"
@@ -81,8 +100,8 @@ print(json.dumps({
             self.assertEqual(Path(paths["source"]), orders / "小订及首销数据整理.xlsx")
             self.assertEqual(Path(paths["summary"]), orders / "鸿蒙智行销量数据汇总.xlsx")
             self.assertEqual(Path(paths["model"]), shared / "车型信息" / "车型基本信息.xlsx")
-            self.assertEqual(Path(paths["output"]).parent.name, "static")
-            self.assertEqual(Path(paths["output"]).parent.parent.name, "forecast")
+            expected = Path(__file__).resolve().parents[3] / "output_file" / "static"
+            self.assertEqual(Path(paths["output"]).parent, expected)
             self.assertTrue(Path(paths["summary"]).is_relative_to(shared))
             self.assertIn(paths["summary"], paths["history"])
             self.assertEqual(Path(paths["history"][0]), Path(paths["summary"]))

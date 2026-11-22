@@ -46,7 +46,8 @@ class ProjectPathIsolationTests(TestCase):
         self.assertFalse(data_paths.excel_cache_directory().is_relative_to(data_paths.shared_data_root()))
 
     def test_static_report_is_local_and_dynamic_cache_uses_the_data_root(self):
-        with TemporaryDirectory() as directory, patch.dict(os.environ, {"SHARED_DATA_ROOT": ""}):
+        defaults = dict.fromkeys(("SHARED_DATA_ROOT", "SALES_FORECAST_DATA_DIR", "PLANHUB_DATA_ROOT", "PLANHUB_APP_LOG_DIR"), "")
+        with TemporaryDirectory() as directory, patch.dict(os.environ, defaults):
             project = Path(directory) / "销量预测"
             output = data_paths.project_output_directory(project)
             static = data_paths.static_output_directory(project)
