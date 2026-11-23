@@ -23,7 +23,7 @@ from core.data_paths import (
 )
 from core.live_server import (
     ForecastServer, LiveMonitor, SUMMARY_REUSE_UNAVAILABLE, normalize_prefix,
-    previous_published_page, scan_inputs,
+    forecast_batch_files, previous_published_page, scan_inputs,
 )
 from core.release import runtime_revision
 from core.renderer import FORECAST_PAGE_NAME
@@ -93,6 +93,7 @@ def main() -> int:
     monitor = LiveMonitor(lambda: scan_inputs(input_dir),
                           lambda: build_page(input_dir, live_dir),
                           output_file=live_dir / FORECAST_PAGE_NAME,
+                          batch_files=forecast_batch_files(input_dir),
                           cache_files=(forecast_summary_path(PROJECT_ROOT),),
                           build_from_current_summary=lambda: build_page(input_dir, live_dir, reuse_summary_only=True))
     monitor.restore()
@@ -135,7 +136,7 @@ def main() -> int:
     stop = threading.Event()
     worker = threading.Thread(target=monitor.run, args=(stop,), name="forecast-monitor", daemon=True)
     worker.start()
-    LOGGER.info("动态销量预测：%s；每 300 秒扫描，连续稳定 60 秒后更新；Ctrl+C 退出", url)
+    LOGGER.info("动态销量预测：%s；每 300 秒扫描，9 份 Excel 收齐或首份变化满 1 小时后，稳定 60 秒再更新；Ctrl+C 退出", url)
     if not args.no_open:
         try:
             webbrowser.open(url)
