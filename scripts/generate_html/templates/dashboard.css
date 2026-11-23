@@ -5078,8 +5078,17 @@ body.forecast-app #forecastNavParameters :is(input, select) {
   background: var(--surface-muted);
   font: 500 13px/1.3 var(--ui-font);
 }
-body.forecast-app .topbar #subjectSelect:focus-visible,
-body.forecast-app #forecastNavParameters :is(input, select):focus-visible {
+body.forecast-app .topbar :is(#subjectSelect, #periodSelect):focus,
+body.forecast-app #forecastNavParameters select:focus {
+  border-color: var(--muted);
+  box-shadow: none;
+}
+body.forecast-app .topbar :is(#subjectSelect, #periodSelect):focus-visible,
+body.forecast-app #forecastNavParameters select:focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: -2px;
+}
+body.forecast-app #forecastNavParameters input:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
