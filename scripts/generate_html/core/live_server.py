@@ -25,19 +25,6 @@ from core.renderer import FORECAST_PAGE_NAME, _write_text_atomic
 LOGGER = logging.getLogger(__name__)
 CLIENT_PATH = Path(__file__).resolve().parents[1] / "templates" / "forecast-live.js"
 SUMMARY_REUSE_UNAVAILABLE = 3
-BATCH_TIMEOUT = 3600
-ORDER_BATCH_FILES = (
-    "鸿蒙智行SKU收敛度报告.xlsx", "鸿蒙智行大定选配比例分析.xlsx",
-    "鸿蒙智行小订退订分析.xlsx", "鸿蒙智行小订选配比例分析.xlsx",
-    "鸿蒙智行订单7级转化报表.xlsx", "鸿蒙智行选配金统计.xlsx",
-    "鸿蒙智行锁单选配比例分析.xlsx", "鸿蒙智行首销期订单节奏.xlsx",
-)
-
-
-def forecast_batch_files(input_dir: Path) -> set[Path]:
-    files = {input_dir / name for name in ORDER_BATCH_FILES}
-    files.add(forecast_reference_directory(PROJECT_ROOT) / "小订及首销数据整理.xlsx")
-    return files
 
 
 @dataclass(frozen=True)
@@ -108,17 +95,10 @@ class LiveMonitor:
     def __init__(self, scan: Callable[[], InputSnapshot], build: Callable[[], bytes],
                  clock=time.monotonic, scan_interval=300, stable_seconds=60,
                  output_file: Path | None = None, cache_files: tuple[Path, ...] = (), *,
-                 batch_files=(), wall_clock=time.time,
                  build_from_current_summary: Callable[[], bytes | None] | None = None):
         self.scan = scan
         self.build = build
         self.clock = clock
-        self.wall_clock = wall_clock
-        self.batch_files = {str(Path(path).resolve()) for path in batch_files}
-        self._batch_baseline = None
-        self._batch_deadline = None
-        self._batch_sleeping = False
-        self._checkpoint_data = None
         self.scan_interval = scan_interval
         self.stable_seconds = stable_seconds
         self.output_file = output_file
@@ -174,19 +154,12 @@ class LiveMonitor:
             source = saved["snapshot"]
             snapshot = InputSnapshot(source["day"], tuple(tuple(row) for row in source["files"]))
             self._restored = (snapshot, saved["artifacts"])
-            self._checkpoint_data = saved
-            self._batch_baseline = self._batch_facts(snapshot)
-            deadline = saved.get("batch_deadline")
-            if isinstance(deadline, (int, float)):
-                remaining = max(0, min(BATCH_TIMEOUT, deadline - self.wall_clock()))
-                self._batch_deadline = self.clock() + remaining
             return True
         except (OSError, ValueError, TypeError, KeyError, AttributeError):
             # Missing checkpoints from older runs do not hide a usable same-version page.
             return False
 
     def _save_checkpoint(self, snapshot: InputSnapshot, content: bytes) -> None:
-        self._checkpoint_data = None
         if self.checkpoint_file is None:
             return
         try:
@@ -194,28 +167,9 @@ class LiveMonitor:
                      "revision": hashlib.sha256(content).hexdigest(),
                      "artifacts": self._cache_artifacts()}
             _write_text_atomic(self.checkpoint_file, json.dumps(saved, ensure_ascii=False))
-            self._checkpoint_data = saved
         except (OSError, ValueError, TypeError):
             # This optional optimization must not fail an already published report.
             LOGGER.warning("快速启动缓存保存失败，下次启动将重新检查并生成", exc_info=True)
-
-    def _batch_facts(self, snapshot):
-        return {path: (size, modified) for path, size, modified in snapshot.files if path in self.batch_files}
-
-    def _set_batch_deadline(self, now, active):
-        if active == (self._batch_deadline is not None):
-            return
-        self._batch_deadline = now + BATCH_TIMEOUT if active else None
-        if self._checkpoint_data is None:
-            return
-        if active:
-            self._checkpoint_data["batch_deadline"] = self.wall_clock() + BATCH_TIMEOUT
-        else:
-            self._checkpoint_data.pop("batch_deadline", None)
-        try:
-            _write_text_atomic(self.checkpoint_file, json.dumps(self._checkpoint_data, ensure_ascii=False))
-        except OSError:
-            LOGGER.warning("批次等待时间未能保存，重启后可能重新计时", exc_info=True)
 
     def page(self) -> tuple[bytes | None, str]:
         with self._lock:
@@ -248,9 +202,8 @@ class LiveMonitor:
 
     def _tick(self) -> None:
         now = self.clock()
-        if (self._pending is None or self._batch_sleeping) and now < self._next_scan:
+        if self._pending is None and now < self._next_scan:
             return
-        self._batch_sleeping = False
         current = self.scan()
         self._next_scan = now + self.scan_interval
         if self._restored is not None:
@@ -262,27 +215,12 @@ class LiveMonitor:
                     LOGGER.info("输入、业务日期及汇总未变化，已恢复上次预测，无需等待或重新生成")
             except OSError:
                 LOGGER.info("快速启动依赖不可用，按稳定检查流程重新生成")
-        facts = self._batch_facts(current)
-        batch_changed = self._batch_baseline is not None and facts != self._batch_baseline
-        self._set_batch_deadline(now, batch_changed)
         if current == self._applied:
             self._pending = None
             self._set_state("ready")
             return
         content = None
-        if batch_changed:
-            # Only distinct, present inputs changed since the last publication count.
-            updated = sum(value != self._batch_baseline.get(path) for path, value in facts.items())
-            if updated < len(self.batch_files) and now < self._batch_deadline:
-                if current != self._pending:
-                    self._stable_since = now
-                    LOGGER.info("本批已更新 %s/%s 份 Excel，等待收齐或满 1 小时", updated, len(self.batch_files))
-                self._pending = current
-                self._batch_sleeping = True
-                self._next_scan = min(self._next_scan, self._batch_deadline)
-                self._set_state("waiting")
-                return
-        if not batch_changed and self._applied is None and self._build_from_current_summary is not None:
+        if self._applied is None and self._build_from_current_summary is not None:
             build_from_summary = self._build_from_current_summary
             self._build_from_current_summary = None
             self._set_state("building")
@@ -315,8 +253,6 @@ class LiveMonitor:
             self._save_checkpoint(current, content)
         self.seed(content)
         self._applied = current
-        self._batch_baseline = facts
-        self._batch_deadline = None
         self._pending = None
         self._next_scan = finished + self.scan_interval
         self._set_state("ready")
