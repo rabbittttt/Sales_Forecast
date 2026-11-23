@@ -736,7 +736,13 @@
     state.forecastCampaign=params.get("forecastCampaign")||null;
     const requestedView=normalizeForecastView(params.get("forecastView"));if(forecastViews.includes(requestedView))state.forecastView=requestedView;
     if(!FORECAST_APP&&DATA.forecast_page&&state.module==='sales_forecast'&&moduleAvailable(subject(),'sales_forecast')){location.replace(forecastPageUrl());return;}
-    if(FORECAST_APP)$('#subjectSelect').setAttribute('aria-label','预测车型');
+    if (FORECAST_APP) {
+      const modelSelect = $('#subjectSelect');
+      const caption = modelSelect.labels[0].querySelector('span');
+      caption.textContent = '预测车型';
+      caption.classList.remove('sr-only');
+      modelSelect.removeAttribute('aria-label');
+    }
     $("#updatedAt").textContent=`生成时间 ${DATA.meta.generated_at.replace("T"," ")}`;
     bindStatic();renderSubjectSelect();if(await ensureState()===false)return;await renderAll();syncUrl("replace");
   }

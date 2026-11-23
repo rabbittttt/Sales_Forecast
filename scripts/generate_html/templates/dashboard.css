@@ -5068,6 +5068,7 @@ body.forecast-app #forecastNavParameters label {
   font-size: var(--type-note);
   white-space: nowrap;
 }
+body.forecast-app .topbar #subjectSelect,
 body.forecast-app #forecastNavParameters :is(input, select) {
   min-height: 38px;
   padding: 4px 6px;
@@ -5077,6 +5078,7 @@ body.forecast-app #forecastNavParameters :is(input, select) {
   background: var(--surface-muted);
   font: 500 13px/1.3 var(--ui-font);
 }
+body.forecast-app .topbar #subjectSelect:focus-visible,
 body.forecast-app #forecastNavParameters :is(input, select):focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
@@ -5133,6 +5135,7 @@ body.forecast-app .forecast-workspace.forecast-studio .forecast-target-meta {
       minmax(112px, 1.3fr) minmax(90px, 1.1fr) minmax(48px, .65fr) !important;
     gap: 6px;
   }
+  body.forecast-app .topbar #subjectSelect,
   body.forecast-app #forecastNavParameters :is(input, select) {
     height: 30px;
     min-height: 30px;
@@ -5153,6 +5156,7 @@ body.forecast-app .forecast-workspace.forecast-studio .forecast-target-meta {
   body.forecast-app #forecastNavParameters .forecast-target-form {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
+  body.forecast-app .topbar #subjectSelect,
   body.forecast-app #forecastNavParameters :is(input, select) { min-height: 42px; }
   body.forecast-app #forecastNavParameters label > small { bottom: 13px; }
 }
@@ -5169,6 +5173,9 @@ body.forecast-app .topbar:has(> #forecastNavParameters) {
 body.forecast-app .topbar:has(> #forecastNavParameters) .topbar-main {flex:0 1 auto; margin:0; min-width:0}
 body.forecast-app .topbar:has(> #forecastNavParameters) .filters {flex:1 1 auto; min-width:0; width:auto}
 body.forecast-app .topbar:has(> #forecastNavParameters) .filters label {width:clamp(125px,15vw,250px); min-width:0; flex:1 1 auto}
+body.forecast-app .topbar label:has(> #subjectSelect) {
+  display:grid; gap:2px; line-height:1.25; text-align:start;
+}
 body.forecast-app .topbar #periodContext,
 body.forecast-app #forecastHeaderTools .forecast-stage-switcher,
 body.forecast-app .forecast-workspace .forecast-target[hidden] {display:none}
@@ -5178,6 +5185,9 @@ body.forecast-app .module-bar:has(#forecastHeaderTools) {
   grid-template-areas:"stage views time tools reset"; gap:8px 12px; align-items:center;
 }
 body.forecast-app .module-bar #moduleNav {grid-area:stage; width:auto}
+body.forecast-app #moduleNav [data-forecast-nav][aria-current=page] {
+  background:var(--primary-strong); color:white; font-weight:700;
+}
 body.forecast-app .module-bar .top-actions {grid-area:time; color:var(--muted); font-size:12px}
 body.forecast-app #forecastHeaderTools:not([hidden]),
 body.forecast-app #forecastHeaderTools > .forecast-target-meta {display:contents}
@@ -5187,13 +5197,22 @@ body.forecast-app #forecastHeaderTools > .forecast-target-meta {display:contents
 }
 body.forecast-app #forecastHeaderTools .forecast-target-tabs {
   grid-area:views; display:flex; justify-self:start; align-items:center; gap:2px;
-  margin:0; padding:3px; border:0; background:var(--surface-muted); border-radius:10px;
+  margin:0; padding:3px; border:0; background:var(--surface-muted); border-radius:7px;
 }
 #forecastHeaderTools .forecast-target-tabs button, .forecast-header-menu > summary {
   white-space:nowrap; border:0; border-radius:7px; padding:6px 10px;
   background:transparent; color:var(--muted); font:600 13px/1.4 var(--ui-font); cursor:pointer;
 }
-#forecastHeaderTools .forecast-target-tabs button[aria-selected=true] {background:var(--primary-soft); color:var(--primary-strong)}
+#forecastHeaderTools .forecast-target-tabs button {
+  font-size:12px; font-weight:500; border-radius:5px;
+}
+#forecastHeaderTools .forecast-target-tabs button:hover {color:var(--ink)}
+#forecastHeaderTools .forecast-target-tabs button[aria-selected=true] {
+  background:var(--card); color:var(--ink); font-weight:650; box-shadow:inset 0 0 0 1px var(--line);
+}
+#forecastHeaderTools .forecast-target-tabs button:focus-visible {
+  outline:2px solid var(--primary); outline-offset:-2px;
+}
 .forecast-header-menu {grid-area:tools}
 .forecast-header-menu > summary {background:var(--surface-muted); list-style:none}
 .forecast-header-menu > summary::after {content:"▾"; padding-left:5px}
