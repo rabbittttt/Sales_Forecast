@@ -1102,7 +1102,7 @@ button {
   --muted-2:#696f7d;
   --line:#e5e7ed;
   --line-strong:#d7dbe4;
-  --page:#f0f2f5;
+  --page:#f4f6f9;
   --card:#fff;
   --shadow-sm:0 1px 2px rgba(11,13,23,.04);
   --shadow-md:0 8px 24px rgba(11,13,23,.08);
@@ -5162,22 +5162,29 @@ body.forecast-app .forecast-workspace.forecast-studio .forecast-target-meta {
   }
 }
 
-/* The title, current model and content views form one report header. */
-body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) {
-  display: grid; grid-template-columns: auto minmax(120px,auto) 1fr auto auto auto;
-  grid-template-areas: "brand filters views time tools live"; gap: 8px 14px;
-  align-content: center; overflow: visible; z-index: 5;
+/* Model and parameters above; phase, view and actions below. */
+body.forecast-app .topbar:has(> #forecastNavParameters) {
+  display:flex; flex-flow:row nowrap; align-items:center; gap:12px; overflow:visible; z-index:5;
 }
-body.forecast-app #forecastHeaderTools:not([hidden]),
-body.forecast-app #forecastHeaderTools > .forecast-target-meta,
-body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) :is(.topbar-main,.topbar-end) {display:contents}
-body.forecast-app .topbar > .brand {grid-area:brand}
-body.forecast-app .topbar .filters {grid-area:filters}
-body.forecast-app .topbar .top-actions {grid-area:time}
-body.forecast-app .topbar .forecast-refresh-status {grid-area:live}
+body.forecast-app .topbar:has(> #forecastNavParameters) .topbar-main {flex:0 1 auto; margin:0; min-width:0}
+body.forecast-app .topbar:has(> #forecastNavParameters) .filters {flex:1 1 auto; min-width:0; width:auto}
+body.forecast-app .topbar:has(> #forecastNavParameters) .filters label {width:clamp(125px,15vw,250px); min-width:0; flex:1 1 auto}
+body.forecast-app .topbar #periodContext,
 body.forecast-app #forecastHeaderTools .forecast-stage-switcher,
-body.forecast-app .forecast-workspace .forecast-target[hidden],
-body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) #periodContext {display:none}
+body.forecast-app .forecast-workspace .forecast-target[hidden] {display:none}
+body.forecast-app .topbar #forecastNavParameters {max-width:none}
+body.forecast-app .module-bar:has(#forecastHeaderTools) {
+  position:relative; z-index:4; display:grid; grid-template-columns:auto 1fr auto auto auto;
+  grid-template-areas:"stage views time tools reset"; gap:8px 12px; align-items:center;
+}
+body.forecast-app .module-bar #moduleNav {grid-area:stage; width:auto}
+body.forecast-app .module-bar .top-actions {grid-area:time; color:var(--muted); font-size:12px}
+body.forecast-app #forecastHeaderTools:not([hidden]),
+body.forecast-app #forecastHeaderTools > .forecast-target-meta {display:contents}
+#forecastHeaderTools [data-forecast-reset] {
+  grid-area:reset; justify-self:end; white-space:nowrap; cursor:pointer; padding:6px 10px;
+  border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--primary-strong); font-weight:600;
+}
 body.forecast-app #forecastHeaderTools .forecast-target-tabs {
   grid-area:views; display:flex; justify-self:start; align-items:center; gap:2px;
   margin:0; padding:3px; border:0; background:var(--surface-muted); border-radius:10px;
@@ -5203,24 +5210,34 @@ body.forecast-app #forecastHeaderTools .forecast-target-tabs {
 .forecast-header-menu .forecast-source-details {order:1; flex-basis:100%}
 .forecast-header-menu .forecast-source-details > summary {cursor:pointer}
 .forecast-header-menu .forecast-target-sources button {padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--primary-strong); cursor:pointer}
-@media(max-width:1150px){
-  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) .top-actions {display:none}
+@media(max-width:1000px){
+  body.forecast-app .module-bar .top-actions {display:none}
+  body.forecast-app .module-bar:has(#forecastHeaderTools) {gap:6px}
 }
-@media(max-width:1100px){
-  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])),
-  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])):has(.forecast-refresh-status) {
-    height:auto; padding-block:6px; grid-template-columns:auto minmax(0,1fr) auto;
-    grid-template-rows:auto auto; grid-template-areas:"brand filters filters" "views views tools";
-    gap:4px 8px; align-items:center;
+@media(max-width:760px){
+  body.forecast-app .module-bar:has(#forecastHeaderTools) {
+    height:auto; padding-block:4px; grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"stage tools" "views reset";
   }
-  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])):has(.forecast-refresh-status) {
-    grid-template-rows:auto auto auto; grid-template-areas:"brand filters filters" "views views tools" "live live live";
-  }
-  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) .forecast-refresh-status {grid-area:live; justify-self:end}
-  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) > .brand {height:auto; align-self:center}
-  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) .filters {width:auto; min-width:0; flex-wrap:wrap}
-  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) .filters label {flex:1 1 130px; width:auto; min-width:0; max-width:100%}
-  #forecastHeaderTools .forecast-target-tabs button {padding:6px 8px}
+  body.forecast-app .topbar:has(> #forecastNavParameters) > .brand {align-self:center}
+  body.forecast-app .topbar:has(> #forecastNavParameters) .topbar-main {flex:1; min-width:0}
+  body.forecast-app .topbar:has(> #forecastNavParameters) .filters {flex-wrap:wrap}
+  body.forecast-app .topbar:has(> #forecastNavParameters) .filters label {width:100%; max-width:100%}
+  body.forecast-app .module-bar #moduleNav button {padding-inline:5px;gap:3px}
+  body.forecast-app .module-bar .forecast-header-menu {justify-self:end}
+  #forecastHeaderTools .forecast-target-tabs button {padding:6px}
   .forecast-header-menu > summary .forecast-source-brief[data-warning=true] {font-size:0}
   .forecast-header-menu > summary .forecast-source-brief[data-warning=true]::after {content:"!"; font-size:12px}
+}
+@media(max-width:380px){
+  body.forecast-app .module-bar #moduleNav .module-icon {display:none}
+}
+
+.module-bar .top-actions .forecast-refresh-status {margin-inline-start:8px}
+@media(max-width:1000px){
+  body.forecast-app .module-bar .top-actions:has(.forecast-refresh-status) {display:block}
+  .module-bar .top-actions:has(.forecast-refresh-status) #updatedAt {display:none}
+}
+@media(max-width:760px){
+  body.forecast-app .module-bar:has(.forecast-refresh-status) {grid-template-areas:"stage tools" "views reset" "time time"}
 }

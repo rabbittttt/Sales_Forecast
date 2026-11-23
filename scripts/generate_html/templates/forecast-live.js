@@ -41,7 +41,7 @@
       label = document.createElement("small");
       label.setAttribute("role", "status");
       label.className = "forecast-refresh-status";
-      toolbar.append(label);
+      (document.querySelector(".module-bar .top-actions") || toolbar).append(label);
     }
     const message = state === "error" ? "后台数据刷新失败，等待重试" : "后台数据刷新中";
     if (label.textContent !== message) {
@@ -63,6 +63,7 @@
         location.reload();
       } else {
         updateRefreshNotice(status.previous_result, status.state);
+        document.querySelector(".forecast-workspace")?._syncSharedImports?.();
       }
     } catch {
       // Keep the current report when the local service is temporarily unavailable.

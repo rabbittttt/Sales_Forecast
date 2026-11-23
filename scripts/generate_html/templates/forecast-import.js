@@ -1,4 +1,4 @@
-/* Local-only forecast import. No upload, no modification of actual orders. */
+/* Parse forecast files locally; the live service shares normalized rows. */
 (function (root) {
   'use strict';
   const MAX_BYTES = 5 * 1024 * 1024, MAX_XML = 20 * 1024 * 1024;
@@ -53,7 +53,7 @@
       for(const [field,column] of (small>=0||gross>=0?[['small',small],['gross',gross]]:[['quantity',quantity]])){
         if(column<0)continue;
         const raw=row[column];if(raw==null||String(raw).trim()==='')continue;
-        const value=Number(raw);if(typeof raw==='boolean'||!Number.isSafeInteger(value)||value<0)throw Error('第'+(i+2)+'行数量须为非负整数');
+        const value=Number(raw);if(typeof raw==='boolean'||!Number.isFinite(value)||value<0||value>Number.MAX_SAFE_INTEGER)throw Error('第'+(i+2)+'行数量须为可安全计算的非负数');
         result[field]=value;
       }
       if(Object.keys(result).length===2)throw Error('第'+(i+2)+'行至少填写一种预测数量');

@@ -64,13 +64,13 @@ const screenshot = (page, name) => page.screenshot({path: path.join(output, name
     assert.deepEqual(await fieldNames(), expectedFields);
     assert.equal(await draftPage.locator('[data-forecast-target]').count(), expectedFields.length);
     const wideLayout = await navigation.evaluate(menu => {
-      const stage = document.querySelector('#moduleNav button:last-child').getBoundingClientRect();
+      const stage = document.querySelector('#subjectSelect').getBoundingClientRect();
       const controls = [...menu.querySelectorAll('[data-forecast-target]')].map(input => input.getBoundingClientRect());
       return menu.open && controls.every(box =>
         box.width > 0 && box.left >= stage.right && box.right <= innerWidth &&
         box.top < stage.bottom && box.bottom > stage.top);
     });
-    assert(wideLayout, 'All nine fields share the stage navigation row on a wide screen');
+    assert(wideLayout, 'All nine fields share the model selection row on a wide screen');
 
     const days = navigation.locator('[data-forecast-target="days"]');
     const changedDays = (await days.inputValue()) === '5' ? '6' : '5';

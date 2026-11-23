@@ -102,7 +102,8 @@ def main() -> int:
             monitor.seed(previous_page, previous=True)
             LOGGER.info("已载入上次成功生成的页面，当前版本将在后台生成")
     try:
-        server = ForecastServer((args.host, args.port), monitor, live_dir / "forecast_assets", instance_id, args.public_prefix)
+        server = ForecastServer((args.host, args.port), monitor, live_dir / "forecast_assets", instance_id, args.public_prefix,
+                                import_db=output_root / source_key / "external-imports.sqlite3")
     except OSError:
         # Reopening the launcher should open the existing local service.
         existing = f"http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{args.port}"

@@ -334,6 +334,7 @@
 
   const importedForecastRows = new Map();
   const importedForecastUndo = new Map();
+  const sharedForecastUndo = new Map();
   // Per-page local storage: no uploads, and never store actual-order payloads.
   function persistForecastState(){
     try{
@@ -372,7 +373,7 @@
         if(typeof key!=='string'||!Array.isArray(item?.rows)||item.rows.length>20000)throw Error('外部预测保存记录损坏');
         for(const row of item.rows){
           const identity=(row.metric||row.stage)+'|'+row.date,validDate=typeof row.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(row.date)&&Number.isFinite(Date.parse(row.date+'T00:00:00Z'))&&new Date(row.date+'T00:00:00Z').toISOString().slice(0,10)===row.date;
-          if(!validDate||typeof row.model!=='string'||!forecastStages.some(stage=>stage.id===row.stage)||(row.metric&&!['small','gross','lock'].includes(row.metric))||!Number.isSafeInteger(row.quantity)||row.quantity<0||seen.has(identity))throw Error('外部预测保存记录损坏');
+          if(!validDate||typeof row.model!=='string'||!forecastStages.some(stage=>stage.id===row.stage)||(row.metric&&!['small','gross','lock'].includes(row.metric))||(!Number.isFinite(row.quantity)||row.quantity>Number.MAX_SAFE_INTEGER)||row.quantity<0||seen.has(identity))throw Error('外部预测保存记录损坏');
           seen.add(identity);
         }
         imports.push([key,item]);
@@ -418,23 +419,79 @@
     return [...selected.values()];
   }
   function bindForecastImport(root, context) {
-    const importName=()=>{const name=context.targetState().name;if(reconcileForecastImportState(name,context.sameModel))persistForecastState();return name;};
+    const endpoint=document.querySelector?.('meta[name="forecast-import-api"]')?.content;
+    const datasets=endpoint?new Map():importedForecastRows, undoRows=endpoint?sharedForecastUndo:importedForecastUndo;
+    const name=context.targetState().name;
+    const url=endpoint?new URL(endpoint,location.href):null;
+    if(url)url.searchParams.set('model',forecastModelKey(name));
+    let revision=null, serial=0, writing=false, readFailed=false;
+    const statusAll=(message,state)=>{for(const {card} of cards){
+      const notice=card.querySelector('[data-forecast-import-status]');
+      notice.dataset.state=state;notice.textContent=message;
+    }};
+    async function sync(){
+      if(!url||writing||!root.isConnected)return;
+      const token=++serial, readUrl=new URL(url);
+      readUrl.searchParams.set('known',revision??-1);
+      try{
+        const response=await fetch(readUrl,{cache:'no-store'});
+        if(!response.ok)throw Error();
+        const result=await response.json();
+        if(token!==serial||!root.isConnected)return;
+        if(result.revision===revision){
+          if(readFailed)statusAll('共享导入已同步。','success');
+          readFailed=false;return;
+        }
+        readFailed=false;
+        if(result.record)datasets.set(name,result.record);else datasets.delete(name);
+        revision=result.revision;
+        if(undoRows.get(name)?.revision!==revision)undoRows.delete(name);
+        statusAll(result.record?'已载入共享预测，共'+result.record.rows.length+'条。':'当前车型尚无共享导入。','success');
+        render();
+      }catch{
+        if(token===serial){readFailed=true;statusAll('共享导入暂时无法读取，请稍后重试。','error');}
+      }
+    }
+    async function save(name,record){
+      if(url){
+        if(revision===null||writing)throw Error('共享数据正在同步，请稍后重试');
+        writing=true;++serial;
+        try{
+          const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-Forecast-Import':'1'},
+            body:JSON.stringify({revision,record})});
+          const result=await response.json();
+          if(!response.ok)throw Error(result.error||'共享保存失败');
+          revision=result.revision;
+        }catch(error){
+          writing=false;await sync();throw error;
+        }finally{writing=false;}
+      }
+      if(record)datasets.set(name,record);else datasets.delete(name);
+      return !!url||persistForecastState();
+    }
+    const importName=()=>{const name=context.targetState().name;if(!endpoint&&reconcileForecastImportState(name,context.sameModel))persistForecastState();return name;};
     const stages={small:['小订','小订量'],launch:['首销','总大定'],steady:['平销','交车锁单']};
     const stageFor=(date,target,preferred)=>{
       const windows={small:!!target.smallStartDate&&date>=target.smallStartDate&&date<=target.smallEndDate,launch:!!target.launchDate&&date>=target.launchDate&&date<=context.stageInfo(target).end,steady:!!target.steadyStartDate&&date>=target.steadyStartDate};
       return windows[preferred]?preferred:Object.keys(windows).find(key=>windows[key])||'';
     };
+    const displayCount=value=>fmt(Number.isFinite(value)?Math.round(value):null);
     const metricOf=row=>row.metric||(row.stage==='small'?'small':row.stage==='steady'?'lock':'gross');
     const cards=[];
     for(const [stage,[label,unit]] of Object.entries(stages)){
       const anchor=root.querySelector(`[data-forecast-import-anchor="${stage}"]`);if(!anchor)continue;
       const card=document.createElement('section');card.className='forecast-import';card.dataset.forecastImport=stage;
-      card.innerHTML='<div class="forecast-import-head"><div><small>预测曲线外部对照</small><h4>外部逐日预测 · '+label+'</h4></div><p>三个阶段共用导入：小订量、总大定分列；平销总大定按大定到锁单率换算。导入值独立展示，不覆盖真实订单或算法结果。</p></div><details class="forecast-import-manager"><summary>管理导入</summary><div class="forecast-import-actions"><label>导入方式<select data-forecast-import-mode aria-label="外部预测导入方式"><option value="merge">合并（同指标同日更新）</option><option value="replace">替换该车型全部外部预测</option></select></label><label>选择Excel/CSV<input type="file" accept=".xlsx,.csv" data-forecast-import-file aria-label="导入'+label+'逐日预测"></label><button type="button" data-forecast-import-template>下载CSV模板</button><button type="button" data-forecast-import-clear>清除该车型全部导入</button></div><p class="forecast-import-help">字段：车型（代际）、日期、预测小订、预测大定（总大定，不是留存大定）；数量为非负整数，可只填其中一列。一次导入供三个阶段使用；按各阶段日期展示，保留已过日期预测。</p></details><p role="status" aria-live="polite" data-forecast-import-status>尚未导入；成功后自动保存到当前浏览器，不上传。</p><div data-forecast-import-result></div>';
-      card.querySelector('.forecast-import-manager').open=!importedForecastRows.get(importName())?.rows.length;
+      card.innerHTML='<div class="forecast-import-head"><div><small>预测曲线外部对照</small><h4>外部逐日预测 · '+label+'</h4></div><p>三个阶段共用导入：小订量、总大定分列；平销总大定按大定到锁单率换算。导入值独立展示，不覆盖真实订单或算法结果。</p></div><details class="forecast-import-manager"><summary>管理导入</summary><div class="forecast-import-actions"><label>导入方式<select data-forecast-import-mode aria-label="外部预测导入方式"><option value="merge">合并（同指标同日更新）</option><option value="replace">替换该车型全部外部预测</option></select></label><label>选择Excel/CSV<input type="file" accept=".xlsx,.csv" data-forecast-import-file aria-label="导入'+label+'逐日预测"></label><button type="button" data-forecast-import-template>下载CSV模板</button><button type="button" data-forecast-import-clear>清除该车型全部导入</button></div><p class="forecast-import-help">字段：车型（代际）、日期、预测小订、预测大定（总大定，不是留存大定）；数量可填非负小数，显示时四舍五入，可只填其中一列。一次导入供三个阶段使用；按各阶段日期展示，保留已过日期预测。</p></details><p role="status" aria-live="polite" data-forecast-import-status>'+(endpoint?'导入后对本服务所有用户可见。':'导入后保存到当前浏览器。')+'</p><div data-forecast-import-result></div>';
+      card.querySelector('.forecast-import-manager').open=!datasets.get(importName())?.rows.length;
       anchor.append(card);cards.push({stage,unit,card});
       const undo=document.createElement('button');undo.type='button';undo.dataset.forecastImportUndo='';undo.textContent='撤销清除';undo.hidden=true;
       card.querySelector('.forecast-import-actions').append(undo);
-      undo.onclick=()=>{const name=importName(),previous=importedForecastUndo.get(name);if(!previous)return;importedForecastRows.set(name,previous);importedForecastUndo.delete(name);const saved=persistForecastState();for(const {card:other} of cards){const notice=other.querySelector('[data-forecast-import-status]');notice.dataset.state=saved?'success':'loading';notice.textContent='已恢复清除前的全部外部预测。'+(saved?'已保存本机。':forecastStorageWarning);}render();};
+      undo.onclick=async()=>{
+        const name=importName(),previous=undoRows.get(name);if(!previous)return;
+        try{const saved=await save(name,endpoint?previous.record:previous);undoRows.delete(name);
+          statusAll(saved?'已恢复清除前的外部预测。':forecastStorageWarning,saved?'success':'error');render();
+        }catch(error){statusAll(error.message,'error');}
+      };
       const status=card.querySelector('[data-forecast-import-status]'),input=card.querySelector('[data-forecast-import-file]');
       input.onchange=async()=>{
         const file=input.files?.[0];if(!file)return;
@@ -448,20 +505,25 @@
           }),target.name,context.sameModel);
           if(!rows.length)throw Error('没有匹配当前车型“'+target.name+'”的记录，请使用当前代际名或已映射的历史传播名');
           if(!root.isConnected)return;
-          const previous=importedForecastRows.get(target.name);
+          const previous=datasets.get(target.name);
           if(mode==='replace'&&previous?.rows.length&&!window.confirm('替换当前车型全部阶段的外部预测？原有'+previous.rows.length+'条记录将被本文件替换。真实订单和算法结果不受影响。')){status.dataset.state='';status.textContent='已取消替换，原导入数据保持不变。';return;}
           const merged=new Map((mode==='merge'?previous?.rows||[]:[]).map(row=>[metricOf(row)+'|'+row.date,row]));
           let updated=0;for(const row of rows){const key=metricOf(row)+'|'+row.date;if(merged.has(key))updated++;merged.set(key,row);}
           if(merged.size>20000)throw Error('合并后超过20000条记录，请清理旧外部预测或选择替换');
-          importedForecastRows.set(target.name,{filename:file.name,rows:[...merged.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.stage.localeCompare(b.stage))});
-          importedForecastUndo.delete(target.name);
-          const saved=persistForecastState();
-          status.dataset.state=saved?'success':'loading';status.textContent='导入成功：'+rows.length+'条；'+(mode==='merge'?'合并后共'+merged.size+'条，同指标同日更新'+updated+'条':'已替换当前车型全部外部预测')+(all.some(row=>!context.sameModel(row.model,target.name))?'；其他车型记录未导入':'')+'。'+(saved?'已保存本机，刷新可恢复。':forecastStorageWarning);
+          const saved=await save(target.name,{filename:file.name,rows:[...merged.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.stage.localeCompare(b.stage))});
+          undoRows.delete(target.name);
+
+          status.dataset.state=saved?'success':'loading';status.textContent='导入成功：'+rows.length+'条；'+(mode==='merge'?'合并后共'+merged.size+'条，同指标同日更新'+updated+'条':'已替换当前车型全部外部预测')+(all.some(row=>!context.sameModel(row.model,target.name))?'；其他车型记录未导入':'')+'。'+(saved?(endpoint?'已共享。':'已保存本机，刷新可恢复。'):forecastStorageWarning);
           render();
         }catch(error){status.dataset.state='error';status.textContent='导入失败：'+error.message+'；原导入数据保持不变。';}
-        finally{for(const {card:other} of cards){other.querySelectorAll('[data-forecast-import-file],[data-forecast-import-mode],[data-forecast-import-clear],[data-forecast-import-undo]').forEach(control=>control.disabled=false);other.querySelector('[data-forecast-import-clear]').disabled=!importedForecastRows.get(importName())?.rows.length;}input.value='';card.setAttribute('aria-busy','false');}
+        finally{for(const {card:other} of cards){other.querySelectorAll('[data-forecast-import-file],[data-forecast-import-mode],[data-forecast-import-clear],[data-forecast-import-undo]').forEach(control=>control.disabled=false);other.querySelector('[data-forecast-import-clear]').disabled=!datasets.get(importName())?.rows.length;}input.value='';card.setAttribute('aria-busy','false');}
       };
-      card.querySelector('[data-forecast-import-clear]').onclick=()=>{const name=importName(),previous=importedForecastRows.get(name);if(!previous?.rows.length)return;importedForecastUndo.set(name,previous);importedForecastRows.delete(name);const saved=persistForecastState();for(const {card:other} of cards){const notice=other.querySelector('[data-forecast-import-status]');notice.dataset.state=saved?'success':'loading';notice.textContent='已清除当前车型全部阶段的导入数据，可撤销此次清除（刷新后失效）。'+(saved?'本机保存已同步。':forecastStorageWarning);}render();};
+      card.querySelector('[data-forecast-import-clear]').onclick=async()=>{
+        const name=importName(),previous=datasets.get(name);if(!previous?.rows.length)return;
+        try{const saved=await save(name,null);undoRows.set(name,endpoint?{revision,record:previous}:previous);
+          statusAll(saved?'已清除当前车型外部预测，可撤销。':forecastStorageWarning,saved?'success':'error');render();
+        }catch(error){statusAll(error.message,'error');}
+      };
       card.querySelector('[data-forecast-import-template]').onclick=()=>{
         const target=context.targetState(),date=stage==='small'?target.smallStartDate:stage==='launch'?target.launchDate:target.steadyStartDate;
         const text='\uFEFF车型（代际）,日期,预测小订,预测大定\r\n'+[target.name,date||context.todayIso(),'',0].map(csvCell).join(',')+'\r\n';
@@ -469,17 +531,17 @@
       };
     }
     function render(){
-      const target=context.targetState(),imported=importedForecastRows.get(importName()),today=context.todayIso(),actual=context.actualForTarget(target);
+      const target=context.targetState(),imported=datasets.get(importName()),today=context.todayIso(),actual=context.actualForTarget(target);
       const rawRate=root.querySelector('[data-forecast-input="lock"]')?.value;
       const lockRate=rawRate!=null&&rawRate.trim()!==''?Number(rawRate)/100:NaN,validRate=Number.isFinite(lockRate)&&lockRate>=0&&lockRate<=1;
       for(const {stage,unit,card} of cards){
         card.querySelector('[data-forecast-import-clear]').disabled=!imported?.rows.length;
-        card.querySelector('[data-forecast-import-undo]').hidden=!importedForecastUndo.has(target.name);
+        card.querySelector('[data-forecast-import-undo]').hidden=!undoRows.has(target.name)||(endpoint&&revision===null);
         const node=card.querySelector('[data-forecast-import-result]'),notice=card.querySelector('[data-forecast-import-status]');
         const rows=(imported?.rows||[]).filter(row=>(stage==='small'?metricOf(row)==='small':['gross','lock'].includes(metricOf(row)))&&stageFor(row.date,target,stage)===stage&&(metricOf(row)!=='lock'||stage==='steady'));
         const forecasts=new Map();
         for(const row of rows){
-          const value=stage==='steady'&&metricOf(row)==='gross'?(validRate?Math.round(row.quantity*lockRate):null):row.quantity;
+          const value=stage==='steady'&&metricOf(row)==='gross'?(validRate?row.quantity*lockRate:null):row.quantity;
           if(metricOf(row)==='lock'&&forecasts.has(row.date))continue;
           forecasts.set(row.date,{...row,value});
         }
@@ -490,13 +552,14 @@
         if(!dates.length){node.innerHTML='<p>当前阶段暂无实际或外部预测数据。</p>';continue;}
         const values=dates.map(date=>forecasts.get(date)?.value??null),known=values.filter(Number.isFinite),total=known.reduce((a,b)=>a+b,0);
         const rateNote=stage==='steady'?(validRate?'外部预测锁单＝导入总大定 × '+(lockRate*100).toFixed(1)+'%（当前首销预测参数“大定到锁单率”，可人工调整；非留存大定率）。':'大定到锁单率缺失或无效，暂不能换算；已保留导入总大定。'):'导入值独立展示，不覆盖实际或系统预测。';
-        node.innerHTML='<p><b>外部预测合计：'+(known.length?fmt(total):'—')+' 单（'+unit+'）</b>；'+esc(rateNote)+'</p>'+renderLifecycleLineChart({
-          series:[{label:'实际'+unit+'（当天如有则为未完日快照）',values:dates.map(date=>actualMap.get(date)??null),color:'#2859f5',role:'actual'},{label:'外部预测（'+unit+'）',values,color:'#7C3AED',role:'reference',dashed:true}],
+        node.innerHTML='<p><b>外部预测合计：'+(known.length?fmt(Math.round(total)):'—')+' 单（'+unit+'）</b>；'+esc(rateNote)+'</p>'+renderLifecycleLineChart({
+          series:[{label:'实际'+unit+'（当天如有则为未完日快照）',values:dates.map(date=>actualMap.get(date)??null),color:'#2859f5',role:'actual'},{label:'外部预测（'+unit+'）',values:values.map(v=>v==null?null:Math.round(v)),color:'#7C3AED',role:'reference',dashed:true}],
           labels:dates,unit:'number',compact:true,title:stages[stage][0]+'实际与外部逐日预测',ariaLabel:stages[stage][0]+'外部逐日预测折线图',note:'仅展示本阶段日期。已过日期的导入预测保留；缺失留空，不补零；当日实际尚未结束。'
-        })+'<details><summary>查看逐日预测</summary><div class="forecast-score-table"><table><thead><tr><th>日期</th><th>实际'+unit+'</th><th>外部预测'+unit+'</th>'+(stage==='steady'?'<th>导入总大定</th>':'')+'<th>来源文件</th></tr></thead><tbody>'+dates.map(date=>'<tr><td>'+esc(date)+(date===today?'（当日未结束）':'')+'</td><td>'+fmt(actualMap.get(date)??null)+'</td><td>'+fmt(forecasts.get(date)?.value??null)+'</td>'+(stage==='steady'?'<td>'+fmt(metricOf(forecasts.get(date)||{})==='gross'?forecasts.get(date)?.quantity??null:null)+'</td>':'')+'<td>'+esc(forecasts.get(date)?.source||'')+'</td></tr>').join('')+'</tbody></table></div></details>';
+        })+'<details><summary>查看逐日预测</summary><div class="forecast-score-table"><table><thead><tr><th>日期</th><th>实际'+unit+'</th><th>外部预测'+unit+'</th>'+(stage==='steady'?'<th>导入总大定</th>':'')+'<th>来源文件</th></tr></thead><tbody>'+dates.map(date=>'<tr><td>'+esc(date)+(date===today?'（当日未结束）':'')+'</td><td>'+fmt(actualMap.get(date)??null)+'</td><td>'+displayCount(forecasts.get(date)?.value)+'</td>'+(stage==='steady'?'<td>'+displayCount(metricOf(forecasts.get(date)||{})==='gross'?forecasts.get(date)?.quantity:null)+'</td>':'')+'<td>'+esc(forecasts.get(date)?.source||'')+'</td></tr>').join('')+'</tbody></table></div></details>';
       }
     }
     root._renderImportedForecast=render;render();
+    if(endpoint){root._syncSharedImports=sync;sync();}
   }
 
   const boardCache={};
@@ -695,6 +758,9 @@
   }
   function bindStatic(){
     if (FORECAST_APP) {
+      const bar = $('.module-bar');
+      $('.topbar').append($('#forecastNavParameters'));
+      bar.append($('.top-actions'), $('#forecastHeaderTools'));
       bindForecastParameterMenu($('#forecastNavParameters'));
       document.addEventListener('click', event => {
         const menu = document.querySelector('.forecast-header-menu[open]');
@@ -853,7 +919,7 @@
     toggle.textContent = '详情';
     toggle.append(sources.querySelector('[data-forecast-source-brief]'));
     sources.prepend(root.querySelector('[data-forecast-feedback]'));
-    meta.append(menu);
+    meta.append(menu, sources.querySelector('[data-forecast-reset]'));
     menu.append(toggle, sources);
     host.append(meta);
     host.hidden = false;
@@ -866,7 +932,7 @@
       }
     };
     const scale=root.querySelector('.forecast-scale-check');
-    if(scale){const details=document.createElement('details');details.className='forecast-scale-details';const summary=document.createElement('summary');summary.textContent='总体量级合理性校验';details.append(summary);scale.before(details);details.append(scale);}
+    if(scale){const details=document.createElement('details');details.className='forecast-scale-details';const summary=document.createElement('summary');summary.textContent='总体量级合理性校验';details.append(summary);details.open=true;root.querySelector('.forecast-source-method').before(details);details.append(scale);}
   }
   async function activateForecastStage(id,writeHistory=true){
     if(!forecastStages.some(item=>item.id===id))return;
@@ -1569,7 +1635,7 @@
           <label>首销天数<input type="number" min="1" max="90" data-forecast-target="days" value="${target.launch_days||''}"><small>天</small></label>
         </div></div>
         <span class="forecast-status confirmed" data-forecast-feedback role="status" aria-live="polite"><i></i><span>参数实时生效</span></span>
-        <div class="forecast-target-meta"><div class="forecast-stage-switcher" role="group" aria-label="选择预测阶段">${forecastStages.map(stage=>`<button type="button" data-forecast-stage-switch="${stage.id}" aria-pressed="${activeForecastStage===stage.id}">${stage.label}</button>`).join("")}</div><div class="forecast-tabs forecast-target-tabs" role="tablist" aria-label="预测内容"><button id="forecast-tab-result" class="${activeForecastView==='result'?'active':''}" role="tab" aria-selected="${activeForecastView==='result'}" tabindex="${activeForecastView==='result'?0:-1}" data-forecast-tab="result">预测结论</button><button id="forecast-tab-evidence" class="${activeForecastView==='evidence'?'active':''}" role="tab" aria-selected="${activeForecastView==='evidence'}" tabindex="${activeForecastView==='evidence'?0:-1}" data-forecast-tab="evidence">预测依据</button><button id="forecast-tab-score" class="${activeForecastView==='score'?'active':''}" role="tab" aria-selected="${activeForecastView==='score'}" tabindex="${activeForecastView==='score'?0:-1}" data-forecast-tab="score">预测打分</button></div><div class="forecast-target-sources"><b class="forecast-stage-status" data-forecast-current-day aria-live="polite">${esc(forecastStages.find(item=>item.id===activeForecastStage)?.label||'销量预测')}状态判定中</b><span class="forecast-source-brief" data-forecast-source-brief></span><span class="forecast-time-brief" data-forecast-time-brief></span><details class="forecast-source-details"><summary>来源与时间详情</summary><div class="forecast-source-decision"><b>数据来源</b><span data-forecast-day-source>正在检查当前预测阶段的时间窗口与数据来源</span></div><div class="forecast-source-decision"><b>时间口径</b><span data-forecast-time-summary>正在核对当前时间与各阶段窗口</span></div><p>人工参数和外部预测仅保存到当前浏览器，不上传；重新生成同路径页面后，人工修改项仍保留，真实值按最新数据读取。</p></details><button type="button" data-forecast-reset title="恢复当前车型三个阶段的参数、参考和权重；保留外部导入">恢复系统推荐</button></div></div>
+        <div class="forecast-target-meta"><div class="forecast-stage-switcher" role="group" aria-label="选择预测阶段">${forecastStages.map(stage=>`<button type="button" data-forecast-stage-switch="${stage.id}" aria-pressed="${activeForecastStage===stage.id}">${stage.label}</button>`).join("")}</div><div class="forecast-tabs forecast-target-tabs" role="tablist" aria-label="预测内容"><button id="forecast-tab-result" class="${activeForecastView==='result'?'active':''}" role="tab" aria-selected="${activeForecastView==='result'}" tabindex="${activeForecastView==='result'?0:-1}" data-forecast-tab="result">预测结论</button><button id="forecast-tab-evidence" class="${activeForecastView==='evidence'?'active':''}" role="tab" aria-selected="${activeForecastView==='evidence'}" tabindex="${activeForecastView==='evidence'?0:-1}" data-forecast-tab="evidence">预测依据</button><button id="forecast-tab-score" class="${activeForecastView==='score'?'active':''}" role="tab" aria-selected="${activeForecastView==='score'}" tabindex="${activeForecastView==='score'?0:-1}" data-forecast-tab="score">预测打分</button></div><div class="forecast-target-sources"><b class="forecast-stage-status" data-forecast-current-day aria-live="polite">${esc(forecastStages.find(item=>item.id===activeForecastStage)?.label||'销量预测')}状态判定中</b><span class="forecast-source-brief" data-forecast-source-brief></span><span class="forecast-time-brief" data-forecast-time-brief></span><details class="forecast-source-details"><summary>来源与时间详情</summary><div class="forecast-source-decision"><b>数据来源</b><span data-forecast-day-source>正在检查当前预测阶段的时间窗口与数据来源</span></div><div class="forecast-source-decision"><b>时间口径</b><span data-forecast-time-summary>正在核对当前时间与各阶段窗口</span></div><p>人工参数仅保存到当前浏览器；重新生成同路径页面后，人工修改项仍保留，真实值按最新数据读取。</p></details><button type="button" data-forecast-reset title="恢复当前车型三个阶段的参数、参考和权重；保留外部导入">恢复系统推荐</button></div></div>
       </section>
       <section class="forecast-stage-pane${activeForecastStage==='small'?' active':''}" role="tabpanel" data-forecast-stage-pane="small">${smallOrderWorkspace}</section>
       <section class="forecast-stage-pane${activeForecastStage==='launch'?' active':''}" role="tabpanel" data-forecast-stage-pane="launch">

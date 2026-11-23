@@ -95,7 +95,7 @@ const values=page=>page.evaluate(()=>{const r=document.querySelector('.forecast-
   check('确认全部替换后仅保留本文件',(await records(page)).length===1&&(await records(page))[0].quantity===9);
   assert.deepStrictEqual(await values(page),original);check('本次界面和导入操作不改变已结束日真实结果',true);
 
-  page.once('dialog',dialog=>dialog.accept());await page.locator('.forecast-header-menu > summary').click();await page.locator('[data-forecast-reset]').click();
+  page.once('dialog',dialog=>dialog.accept());await page.locator('[data-forecast-reset]').click();
   await page.waitForFunction(v=>document.querySelector('[data-forecast-input="conversion"]')?.value===v,defaultConversion);
   check('恢复系统参数不删除外部导入',(await records(page)).length===1&&(await storage(page)).drafts.length===0);
   await page.reload();await ready(page);
@@ -135,7 +135,7 @@ const values=page=>page.evaluate(()=>{const r=document.querySelector('.forecast-
   await page.selectOption('#subjectSelect',{label:target});await ready(page);
   check('切回原车型恢复该车型自己的参数',await page.locator('[data-forecast-input="conversion"]').inputValue()==='42.7');
   // Restore defaults before layout screenshots.
-  page.once('dialog',d=>d.accept());await page.locator('.forecast-header-menu > summary').click();await page.locator('[data-forecast-reset]').click();await page.waitForFunction(v=>document.querySelector('[data-forecast-input="conversion"]')?.value===v,defaultConversion);
+  page.once('dialog',d=>d.accept());await page.locator('[data-forecast-reset]').click();await page.waitForFunction(v=>document.querySelector('[data-forecast-input="conversion"]')?.value===v,defaultConversion);
   await page.waitForFunction(()=>!document.querySelector('#toast').classList.contains('show'));
   await page.locator('[data-forecast-stage-switch="launch"]').click();
   const menu=page.locator('#forecastNavParameters');

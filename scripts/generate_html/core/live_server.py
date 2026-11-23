@@ -9,11 +9,13 @@ import json
 import logging
 from pathlib import Path
 import re
+import sqlite3
 import threading
 import time
 from typing import Callable
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
+from core.external_imports import ImportConflict, ImportStore, valid_text
 from core.config import load_config
 from core.data_paths import (
     FORECAST_SUMMARY_NAME, PROJECT_ROOT, forecast_reference_directory,
@@ -276,10 +278,11 @@ class ForecastServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
 
-    def __init__(self, address, monitor: LiveMonitor, asset_dir: Path | None = None, instance_id="", public_prefix="/"):
+    def __init__(self, address, monitor: LiveMonitor, asset_dir: Path | None = None, instance_id="", public_prefix="/", *, import_db=None):
         self.public_prefix = normalize_prefix(public_prefix)
         self.monitor = monitor
         self.instance_id = instance_id
+        self.imports = ImportStore(import_db) if import_db is not None else None
         self.asset_dir = asset_dir
         super().__init__(address, ForecastHandler)
 
@@ -290,6 +293,43 @@ class ForecastHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self._respond(head=False)
+
+    def _import_api(self, head=False):
+        def reply(body, status=200):
+            self._send(json.dumps(body, ensure_ascii=False).encode(), "application/json; charset=utf-8", status, head)
+
+        try:
+            params = parse_qs(urlsplit(self.path).query)
+            model = params.get("model", [""])[0]
+            if not valid_text(model):
+                raise ValueError("车型无效")
+            if self.command == "POST":
+                if self.headers.get_content_type() != "application/json" or self.headers.get("X-Forecast-Import") != "1":
+                    return reply({"error": "请求格式不正确"}, 415)
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 16 * 1024 * 1024:
+                    return reply({"error": "请求大小不符合要求"}, 413)
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict) or "record" not in data:
+                    raise ValueError("缺少导入记录")
+                result = self.server.imports.write(model, data.get("revision"), data["record"])
+            else:
+                result = self.server.imports.read(model, int(params.get("known", ["-1"])[0]))
+            reply(result)
+        except ImportConflict:
+            reply({"error": "其他人已更新该车型，请核对最新数据后重试"}, 409)
+        except (ValueError, RecursionError, OverflowError):
+            reply({"error": "导入数据格式或数量无效"}, 400)
+        except (OSError, sqlite3.Error):
+            LOGGER.exception("读写共享导入失败")
+            reply({"error": "共享导入存储暂不可用"}, 503)
+
+    def do_POST(self):
+        path = urlsplit(self.path).path
+        if self.server.imports and path in ("/api/imports", self.server.public_prefix + "api/imports"):
+            self._import_api()
+        else:
+            self.send_error(404)
 
     def _send(self, content: bytes, content_type: str, status=200, head=False):
         self.send_response(status)
@@ -322,6 +362,8 @@ class ForecastHandler(BaseHTTPRequestHandler):
                                "ready": ready, "state": state["state"], "public_prefix": prefix}).encode("utf-8")
             self._send(data, "application/json; charset=utf-8",
                        status=200 if path == "/healthz" or healthy else 503, head=head)
+        elif path == "/api/imports" and self.server.imports:
+            self._import_api(head)
         elif path == "/api/status":
             data = json.dumps({**self.server.monitor.status(), "instance": self.server.instance_id},
                               ensure_ascii=False).encode("utf-8")
@@ -343,6 +385,8 @@ class ForecastHandler(BaseHTTPRequestHandler):
                 ).encode("utf-8")
                 self._send(waiting, "text/html; charset=utf-8", status=200, head=head)
                 return
+            if self.server.imports:
+                content = content.replace(b"</head>", b'<meta name="forecast-import-api" content="api/imports"></head>', 1)
             previous = ' data-previous-result="true"' if status["previous_result"] else ""
             client = (f'<script src="{prefix}__forecast_live.js" data-revision="{revision}"'
                       f'{previous} defer></script>').encode("utf-8")

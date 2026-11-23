@@ -204,12 +204,12 @@ for (const [oldName, newName, members] of pairs) {
   assert.equal(f.imports.get(newName).rows.length, 3);
   assert.equal(f.imports.get(newName).rows.find(item => item.date === '2026-11-13').quantity, 22);
   assert(f.imports.get(newName).rows.every(item => item.source === 'updated.csv'));
-  card.querySelector('[data-forecast-import-clear]').onclick();
+  await card.querySelector('[data-forecast-import-clear]').onclick();
   assert(!f.imports.has(newName) && !f.imports.has(oldName));
   assert(f.imports.has(members[0]), 'Clearing an aggregate must preserve its individual members');
   f.root._renderImportedForecast();
   assert(!f.imports.has(newName), 'Re-rendering after clear must not revive the old label');
-  card.querySelector('[data-forecast-import-undo]').onclick();
+  await card.querySelector('[data-forecast-import-undo]').onclick();
   assert.equal(f.imports.get(newName).rows.length, 3);
   name = oldName; f.root._renderImportedForecast();
   assert(f.imports.has(oldName) && !f.imports.has(newName));

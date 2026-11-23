@@ -2,6 +2,7 @@
 import base64
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -35,7 +36,7 @@ def prediction_zip(cell, small=None):
     return base64.b64encode(buffer.getvalue()).decode('ascii')
 
 
-@skipUnless(shutil.which('node') and (PROJECT/'.test_runtime/node_modules/playwright').exists(),
+@skipUnless(shutil.which('node') and Path(os.environ.get('PLAYWRIGHT_MODULE') or PROJECT/'.test_runtime/node_modules/playwright').exists(),
             'Node.js and project browser test runtime required')
 class ExternalExcelQuantityTests(TestCase):
     @classmethod
@@ -46,6 +47,7 @@ class ExternalExcelQuantityTests(TestCase):
             'empty_numeric': prediction_zip('<c r="C2" t="n"><v> </v></c>'),
             'formula_zero': prediction_zip('<c r="C2"><f>1-1</f><v>0</v></c>'),
             'literal_zero': prediction_zip('<c r="C2"><v>0</v></c>'),
+            'decimal': prediction_zip('<c r="C2"><v>12.5</v></c>'),
             'positive': prediction_zip('<c r="C2"><f>1+2</f><v>3</v></c>'),
             'boolean_true': prediction_zip('<c r="C2" t="b"><v>1</v></c>'),
             'boolean_false': prediction_zip('<c r="C2" t="b"><v>0</v></c>'),
@@ -54,12 +56,12 @@ class ExternalExcelQuantityTests(TestCase):
         }
         script = r"""
 const fs=require('fs'),path=require('path'),{pathToFileURL}=require('url');
-const project=path.resolve('../..'),{chromium}=require(path.join(project,'.test_runtime/node_modules/playwright'));
+const project=path.resolve('../..'),{chromium}=require(process.env.PLAYWRIGHT_MODULE||path.join(project,'.test_runtime/node_modules/playwright'));
 (async()=>{
  const cases=JSON.parse(fs.readFileSync(0,'utf8')),browser=await chromium.launch({headless:true,channel:'msedge'});
  try{
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
-  const url=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
+  const url=pathToFileURL(process.env.FORECAST_HTML||path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
   url.search=new URLSearchParams({subject:'问界 M9 2026款',module:'sales_forecast'});
   await page.goto(url.href);await page.waitForSelector('.forecast-workspace');
   await page.addScriptTag({path:path.resolve('templates/forecast-import.js')});
@@ -72,7 +74,7 @@ const project=path.resolve('../..'),{chromium}=require(path.join(project,'.test_
    result.normalize_boolean=[true,false].map(value=>{try{return ForecastImport.normalize([['车型','日期','预测数量'],['测试','2026-10-17',value]])}catch(e){return {error:e.message}}});
    return result;
   },cases);
-  await page.locator('[data-forecast-stage-switch="launch"]').click();
+  await page.locator('[data-forecast-nav="launch"]').click();
   const card=page.locator('[data-forecast-import="launch"]'),input=card.locator('[data-forecast-import-file]');
   await input.setInputFiles({name:'valid.csv',mimeType:'text/csv',buffer:Buffer.from('车型（代际）,日期,预测大定\n问界 M9 2026款,2026-10-17,21')});
   await page.waitForFunction(()=>document.querySelector('[data-forecast-import="launch"] [data-forecast-import-status]')?.textContent.includes('导入成功'));
@@ -97,7 +99,7 @@ const project=path.resolve('../..'),{chromium}=require(path.join(project,'.test_
                 self.assertIn('error', self.results[key])
 
     def test_real_zero_and_cached_formula_result_survive(self):
-        for key, expected in (('formula_zero', 0), ('literal_zero', 0), ('positive', 3)):
+        for key, expected in (('formula_zero', 0), ('literal_zero', 0), ('positive', 3), ('decimal', 12.5)):
             with self.subTest(value=key):
                 self.assertEqual(self.results[key]['rows'][0]['gross'], expected)
 

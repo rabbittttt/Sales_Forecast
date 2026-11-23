@@ -126,9 +126,11 @@ async function run(){
     const importPanel=page.locator('[data-forecast-import="launch"]');
     if(!await importPanel.locator('.forecast-import-manager').evaluate(node=>node.open))await importPanel.locator('.forecast-import-manager > summary').click();
     const launchDate=await page.locator('.forecast-workspace').evaluate(n=>JSON.parse(n.dataset.forecastConfig).target.launch_date);
-    await importPanel.locator('[data-forecast-import-file]').setInputFiles({name:'standalone.csv',mimeType:'text/csv',buffer:Buffer.from('车型（代际）,日期,预测大定\n'+target+','+launchDate+',100\n')});
+    await importPanel.locator('[data-forecast-import-file]').setInputFiles({name:'standalone.csv',mimeType:'text/csv',buffer:Buffer.from('车型（代际）,日期,预测大定\n'+target+','+launchDate+',100.5\n')});
     await page.waitForFunction(()=>document.querySelector('[data-forecast-import="launch"] [data-forecast-import-status]').textContent.includes('导入成功'));
-    check('独立入口支持原外部预测导入',await page.evaluate(()=>JSON.parse(localStorage.getItem('sales-forecast-independent-v1:'+location.pathname)).imports.some(([,entry])=>entry.rows.some(row=>row.quantity===100&&row.source==='standalone.csv'))));
+    check('独立入口支持原外部预测导入',await page.evaluate(()=>JSON.parse(localStorage.getItem('sales-forecast-independent-v1:'+location.pathname)).imports.some(([,entry])=>entry.rows.some(row=>row.quantity===100.5&&row.source==='standalone.csv'))));
+    check('外部预测按整数展示且校验默认展开在来源判断之前', (await importPanel.locator('[data-forecast-import-result]').textContent()).includes('101') &&
+      await page.locator('.forecast-scale-details[open] + .forecast-source-method').count()===1);
     // Editing an old project's storage namespace must not affect this project.
     const independentDraft = await page.evaluate(()=>localStorage.getItem('sales-forecast-independent-v1:'+location.pathname));
     await page.evaluate(()=>localStorage.setItem('harmony-forecast-v1:'+location.pathname,JSON.stringify({version:1,drafts:[],imports:[],scopes:[]})));
@@ -141,10 +143,11 @@ async function run(){
     await page.waitForFunction(()=>document.querySelector('.forecast-workspace').getAttribute('aria-busy')==='false');
     check('改公共参数后可直接查看来源位置',await page.locator('.forecast-source-details[open] [data-forecast-source-location]:not([hidden])').isVisible()&&await page.locator('[data-forecast-day-source]').textContent());
     const titleMenu = page.locator('.forecast-header-menu');
-    const reset = titleMenu.locator('[data-forecast-reset]');
+    const reset = page.locator('.module-bar [data-forecast-reset]');
     page.once('dialog', dialog => dialog.dismiss());
     await reset.click();
-    await reset.press('Escape');
+    await titleMenu.locator(':scope > summary').click();
+    await titleMenu.locator(':scope > summary').press('Escape');
     check('标题栏详情支持恢复推荐、Esc 和键盘焦点返回', await titleMenu.evaluate(menu =>
       !menu.open && document.activeElement === menu.querySelector('summary')));
     check('独立页不发布底表数据',await page.evaluate(()=>window.DASHBOARD_DATA.raw_files.length===0&&Object.keys(window.DASHBOARD_DATA.raw_block_urls).length===0&&Object.keys(window.DASHBOARD_RAW_B64).length===0));
@@ -153,8 +156,8 @@ async function run(){
     check('未请求底表资源',!requests.some(value=>value.includes('/forecast_assets/')));
     for(const width of [1366,1920,390]){
       await page.setViewportSize({width,height:1000});
-      check(width+'px标题栏提供三个内容标签并收起重复车型卡', await page.locator('.topbar [data-forecast-tab]').count()===3 &&
-        await page.locator('.forecast-target').isHidden() && await page.locator('.topbar .forecast-header-menu > summary').isVisible());
+      check(width+'px标题栏提供三个内容标签并收起重复车型卡', await page.locator('.module-bar [data-forecast-tab]').count()===3 &&
+        await page.locator('.forecast-target').isHidden() && await page.locator('.module-bar .forecast-header-menu > summary').isVisible());
       check(width+'px预测导航无返回订单分析入口',await page.locator('.forecast-order-link').count()===0&&await page.getByRole('link',{name:'返回订单分析'}).count()===0);
       check(width+'px预测导航仅含三阶段',JSON.stringify(await page.locator('[data-forecast-nav]').evaluateAll(nodes=>nodes.map(node=>node.dataset.forecastNav)))===JSON.stringify(['small','launch','steady'])&&JSON.stringify(await page.locator('#moduleSelect option').evaluateAll(nodes=>nodes.map(node=>node.value)))===JSON.stringify(['small','launch','steady']));
       const menu=page.locator('#forecastNavParameters');
