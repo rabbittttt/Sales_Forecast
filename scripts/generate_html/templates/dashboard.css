@@ -5161,3 +5161,66 @@ body.forecast-app .forecast-workspace.forecast-studio .forecast-target-meta {
     display: none;
   }
 }
+
+/* The title, current model and content views form one report header. */
+body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) {
+  display: grid; grid-template-columns: auto minmax(120px,auto) 1fr auto auto auto;
+  grid-template-areas: "brand filters views time tools live"; gap: 8px 14px;
+  align-content: center; overflow: visible; z-index: 5;
+}
+body.forecast-app #forecastHeaderTools:not([hidden]),
+body.forecast-app #forecastHeaderTools > .forecast-target-meta,
+body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) :is(.topbar-main,.topbar-end) {display:contents}
+body.forecast-app .topbar > .brand {grid-area:brand}
+body.forecast-app .topbar .filters {grid-area:filters}
+body.forecast-app .topbar .top-actions {grid-area:time}
+body.forecast-app .topbar .forecast-refresh-status {grid-area:live}
+body.forecast-app #forecastHeaderTools .forecast-stage-switcher,
+body.forecast-app .forecast-workspace .forecast-target[hidden],
+body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) #periodContext {display:none}
+body.forecast-app #forecastHeaderTools .forecast-target-tabs {
+  grid-area:views; display:flex; justify-self:start; align-items:center; gap:2px;
+  margin:0; padding:3px; border:0; background:var(--surface-muted); border-radius:10px;
+}
+#forecastHeaderTools .forecast-target-tabs button, .forecast-header-menu > summary {
+  white-space:nowrap; border:0; border-radius:7px; padding:6px 10px;
+  background:transparent; color:var(--muted); font:600 13px/1.4 var(--ui-font); cursor:pointer;
+}
+#forecastHeaderTools .forecast-target-tabs button[aria-selected=true] {background:var(--primary-soft); color:var(--primary-strong)}
+.forecast-header-menu {grid-area:tools}
+.forecast-header-menu > summary {background:var(--surface-muted); list-style:none}
+.forecast-header-menu > summary::after {content:"▾"; padding-left:5px}
+.forecast-header-menu[open] > summary::after {content:"▴"}
+.forecast-header-menu > summary .forecast-source-brief {display:none}
+.forecast-header-menu > summary .forecast-source-brief[data-warning=true] {display:inline; margin-left:6px; color:#a33d17}
+.forecast-header-menu .forecast-target-sources {
+  position:absolute; inset:100% var(--navigation-gutter) auto auto; width:min(420px,calc(100% - 24px));
+  display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:10px;
+  margin:0; padding:14px; border:1px solid var(--line); border-radius:12px;
+  box-shadow:var(--shadow-md); background:var(--card); color:var(--ink); font-size:13px;
+  max-height:65dvh; overflow:auto;
+}
+.forecast-header-menu .forecast-source-details {order:1; flex-basis:100%}
+.forecast-header-menu .forecast-source-details > summary {cursor:pointer}
+.forecast-header-menu .forecast-target-sources button {padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--primary-strong); cursor:pointer}
+@media(max-width:1150px){
+  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) .top-actions {display:none}
+}
+@media(max-width:1100px){
+  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])),
+  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])):has(.forecast-refresh-status) {
+    height:auto; padding-block:6px; grid-template-columns:auto minmax(0,1fr) auto;
+    grid-template-rows:auto auto; grid-template-areas:"brand filters filters" "views views tools";
+    gap:4px 8px; align-items:center;
+  }
+  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])):has(.forecast-refresh-status) {
+    grid-template-rows:auto auto auto; grid-template-areas:"brand filters filters" "views views tools" "live live live";
+  }
+  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) .forecast-refresh-status {grid-area:live; justify-self:end}
+  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) > .brand {height:auto; align-self:center}
+  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) .filters {width:auto; min-width:0; flex-wrap:wrap}
+  body.forecast-app .topbar:has(#forecastHeaderTools:not([hidden])) .filters label {flex:1 1 130px; width:auto; min-width:0; max-width:100%}
+  #forecastHeaderTools .forecast-target-tabs button {padding:6px 8px}
+  .forecast-header-menu > summary .forecast-source-brief[data-warning=true] {font-size:0}
+  .forecast-header-menu > summary .forecast-source-brief[data-warning=true]::after {content:"!"; font-size:12px}
+}

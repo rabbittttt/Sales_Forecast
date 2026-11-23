@@ -86,6 +86,7 @@ const numericSnapshot=page=>page.evaluate(()=>{
  check('车型与时间参数始终展开',await settings.evaluate(n=>n.tagName==='DIV'&&n.querySelectorAll('[data-forecast-target]').length===7&&!n.querySelector('summary')));
  await shot('settings-mobile');
  check('参数直接展开后无整页溢出',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ await page.locator('.forecast-header-menu > summary').click();
  const sourceDetails=page.locator('.forecast-source-details');await sourceDetails.locator('summary').click();
  check('数据来源展开后仍完整可读',await page.locator('[data-forecast-day-source]').isVisible()&&await page.locator('[data-forecast-time-summary]').isVisible());
  await sourceDetails.locator('summary').click();

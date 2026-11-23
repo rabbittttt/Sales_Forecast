@@ -136,15 +136,25 @@ async function run(){
     check('旧项目草稿变化不影响独立参数与导入',await conversion.inputValue()==='41.2'&&await page.evaluate(raw=>localStorage.getItem('sales-forecast-independent-v1:'+location.pathname)===raw,independentDraft));
     await page.locator('[data-forecast-tab="evidence"]').click();
     await page.locator('[data-bridge-stage="launch"] [data-bridge-control="workday"]').fill('1.07');
+    await page.locator('.forecast-header-menu > summary').click();
     await page.locator('[data-workspace-source]').click();
     await page.waitForFunction(()=>document.querySelector('.forecast-workspace').getAttribute('aria-busy')==='false');
     check('改公共参数后可直接查看来源位置',await page.locator('.forecast-source-details[open] [data-forecast-source-location]:not([hidden])').isVisible()&&await page.locator('[data-forecast-day-source]').textContent());
+    const titleMenu = page.locator('.forecast-header-menu');
+    const reset = titleMenu.locator('[data-forecast-reset]');
+    page.once('dialog', dialog => dialog.dismiss());
+    await reset.click();
+    await reset.press('Escape');
+    check('标题栏详情支持恢复推荐、Esc 和键盘焦点返回', await titleMenu.evaluate(menu =>
+      !menu.open && document.activeElement === menu.querySelector('summary')));
     check('独立页不发布底表数据',await page.evaluate(()=>window.DASHBOARD_DATA.raw_files.length===0&&Object.keys(window.DASHBOARD_DATA.raw_block_urls).length===0&&Object.keys(window.DASHBOARD_RAW_B64).length===0));
     await page.goto(url(forecastName,{...forecastParams,module:'raw',rawFile:'旧底表.xlsx',rawSheet:'旧表'}));await ready(page);
     check('旧底表链接转回预测并保留车型和草稿',new URL(page.url()).searchParams.get('module')==='sales_forecast'&&await page.locator('#subjectSelect').evaluate(n=>n.selectedOptions[0].textContent)===target&&await conversion.inputValue()==='41.2');
     check('未请求底表资源',!requests.some(value=>value.includes('/forecast_assets/')));
     for(const width of [1366,1920,390]){
       await page.setViewportSize({width,height:1000});
+      check(width+'px标题栏提供三个内容标签并收起重复车型卡', await page.locator('.topbar [data-forecast-tab]').count()===3 &&
+        await page.locator('.forecast-target').isHidden() && await page.locator('.topbar .forecast-header-menu > summary').isVisible());
       check(width+'px预测导航无返回订单分析入口',await page.locator('.forecast-order-link').count()===0&&await page.getByRole('link',{name:'返回订单分析'}).count()===0);
       check(width+'px预测导航仅含三阶段',JSON.stringify(await page.locator('[data-forecast-nav]').evaluateAll(nodes=>nodes.map(node=>node.dataset.forecastNav)))===JSON.stringify(['small','launch','steady'])&&JSON.stringify(await page.locator('#moduleSelect option').evaluateAll(nodes=>nodes.map(node=>node.value)))===JSON.stringify(['small','launch','steady']));
       const menu=page.locator('#forecastNavParameters');

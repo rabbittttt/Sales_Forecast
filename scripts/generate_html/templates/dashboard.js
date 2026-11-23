@@ -329,7 +329,7 @@
       root._forecastTouched.add(forecastDraftControlKey(control));
     });
     root.dataset.forecastDirty="true";root._forecastRestoreDraft?.(draft.meta||{});
-    const feedback=root.querySelector('[data-forecast-feedback]');if(feedback){feedback.dataset.state=forecastStorageWarning?'loading':'success';feedback.querySelector('span').textContent=forecastStorageWarning?'仅当前页保存':'已恢复本机草稿';feedback.title=forecastStorageWarning||(draft.generatedAt!==DATA.meta?.generated_at?'数据版本已更新：只恢复人工修改项，真实订单和未修改参数采用本次生成数据。':'已恢复当前浏览器保存的人工参数。');}
+    const feedback=(root._forecastToolbar || root).querySelector('[data-forecast-feedback]');if(feedback){feedback.dataset.state=forecastStorageWarning?'loading':'success';feedback.querySelector('span').textContent=forecastStorageWarning?'仅当前页保存':'已恢复本机草稿';feedback.title=forecastStorageWarning||(draft.generatedAt!==DATA.meta?.generated_at?'数据版本已更新：只恢复人工修改项，真实订单和未修改参数采用本次生成数据。':'已恢复当前浏览器保存的人工参数。');}
   }
 
   const importedForecastRows = new Map();
@@ -694,7 +694,13 @@
     });
   }
   function bindStatic(){
-    if (FORECAST_APP) bindForecastParameterMenu($('#forecastNavParameters'));
+    if (FORECAST_APP) {
+      bindForecastParameterMenu($('#forecastNavParameters'));
+      document.addEventListener('click', event => {
+        const menu = document.querySelector('.forecast-header-menu[open]');
+        if (menu && !menu.contains(event.target)) menu.open = false;
+      }, true);
+    }
     history.scrollRestoration='manual';
     let readingTimer;
     document.addEventListener('scroll',event=>{if(event.target.matches?.('#page,#rawTable')&&!readingTimer)readingTimer=setTimeout(()=>{readingTimer=null;rememberReadingPosition()},500)},true);
@@ -789,18 +795,18 @@
     return '依据：'+(value.split(/[。；]/)[0]||'待核对');
   }
   function refreshForecastHeaderBrief(root){
-    const source=root.querySelector('[data-forecast-day-source]')?.textContent||'';
-    const time=root.querySelector('[data-forecast-time-summary]')?.textContent||'';
-    const brief=root.querySelector('[data-forecast-source-brief]'),date=root.querySelector('[data-forecast-time-brief]');
+    const source=(root._forecastToolbar || root).querySelector('[data-forecast-day-source]')?.textContent||'';
+    const time=(root._forecastToolbar || root).querySelector('[data-forecast-time-summary]')?.textContent||'';
+    const brief=(root._forecastToolbar || root).querySelector('[data-forecast-source-brief]'),date=(root._forecastToolbar || root).querySelector('[data-forecast-time-brief]');
     if(brief){brief.textContent=forecastSourceBrief(source);brief.title=source;brief.dataset.warning=String(/缺失|异常|不可用|原始数据错误/.test(source));}
     if(date){const day=time.match(/判定日期(\d{4}-\d{2}-\d{2})/)?.[1];date.textContent=day?'判定日 '+day:'判定日待核对';date.title=time;}
   }
   function showForecastStageSummary(root,id){
     if(!root)return;
-    const suffix=id.charAt(0).toUpperCase()+id.slice(1),label=forecastStages.find(item=>item.id===id)?.label||"销量预测",badge=root.querySelector('[data-forecast-current-day]'),source=root.querySelector('[data-forecast-day-source]');
+    const suffix=id.charAt(0).toUpperCase()+id.slice(1),label=forecastStages.find(item=>item.id===id)?.label||"销量预测",badge=(root._forecastToolbar || root).querySelector('[data-forecast-current-day]'),source=(root._forecastToolbar || root).querySelector('[data-forecast-day-source]');
     if(badge)badge.textContent=root.dataset[`forecastStatus${suffix}`]||`${label}状态判定中`;
     if(source)source.textContent=root.dataset[`forecastSource${suffix}`]||`正在检查${label}的时间阶段与数据来源`;
-    const sourceLocation=root.querySelector('[data-forecast-source-location]');if(sourceLocation&&sourceLocation.dataset.forecastSourceStage!==id)sourceLocation.hidden=true;
+    const sourceLocation=(root._forecastToolbar || root).querySelector('[data-forecast-source-location]');if(sourceLocation&&sourceLocation.dataset.forecastSourceStage!==id)sourceLocation.hidden=true;
     refreshForecastHeaderBrief(root);
   }
   function setForecastStageSummary(root,id,status,source){
@@ -816,7 +822,7 @@
     const stage=forecastStages.some(item=>item.id===state.forecastStage)?state.forecastStage:"launch",prefix=stage==="launch"?"forecast":`${stage}-forecast`;
     state.forecastView=id;
     if(FORECAST_APP)document.body.dataset.forecastView=id;
-    root.querySelectorAll('[data-forecast-tab]').forEach(button=>{const active=button.dataset.forecastTab===id;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active));button.setAttribute('aria-controls',`${prefix}-pane-${button.dataset.forecastTab}`);button.tabIndex=active?0:-1});
+    (root._forecastToolbar || root).querySelectorAll('[data-forecast-tab]').forEach(button=>{const active=button.dataset.forecastTab===id;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active));button.setAttribute('aria-controls',`${prefix}-pane-${button.dataset.forecastTab}`);button.tabIndex=active?0:-1});
     root.querySelectorAll('[data-forecast-pane]').forEach(pane=>pane.classList.toggle('active',pane.dataset.forecastPane===id));
     root.querySelectorAll('[data-lifecycle-subpane]').forEach(pane=>pane.classList.toggle('active',pane.dataset.lifecycleSubpane===`${stage}-${id}`));
     if(stage==='launch'&&id==='score')root._renderLaunchScoreDashboard?.();
@@ -824,6 +830,9 @@
   function mountForecastNavSettings(root){
     const menu = $('#forecastNavParameters');
     menu.querySelector('.forecast-target-settings')?.remove();
+    const host = $('#forecastHeaderTools');
+    host.replaceChildren();
+    host.hidden = true;
     const settings = root?.querySelector('.forecast-target-settings');
     menu.hidden = !settings;
     if (settings) {
@@ -835,6 +844,27 @@
     mountForecastNavSettings(root);
     if(!root)return;
     root.querySelector('.forecast-source-details').insertAdjacentHTML('beforebegin','<button type="button" class="forecast-source-button" data-workspace-source>来源数据</button>');
+    const host = $('#forecastHeaderTools');
+    const meta = root.querySelector('.forecast-target-meta');
+    const sources = meta.querySelector('.forecast-target-sources');
+    const menu = document.createElement('details');
+    menu.className = 'forecast-header-menu';
+    const toggle = document.createElement('summary');
+    toggle.textContent = '详情';
+    toggle.append(sources.querySelector('[data-forecast-source-brief]'));
+    sources.prepend(root.querySelector('[data-forecast-feedback]'));
+    meta.append(menu);
+    menu.append(toggle, sources);
+    host.append(meta);
+    host.hidden = false;
+    root._forecastToolbar = meta;
+    root.querySelector('.forecast-target').hidden = true;
+    menu.onkeydown = event => {
+      if (event.key === 'Escape' && menu.open) {
+        menu.open = false;
+        toggle.focus();
+      }
+    };
     const scale=root.querySelector('.forecast-scale-check');
     if(scale){const details=document.createElement('details');details.className='forecast-scale-details';const summary=document.createElement('summary');summary.textContent='总体量级合理性校验';details.append(summary);scale.before(details);details.append(scale);}
   }
@@ -2242,7 +2272,7 @@
         if(FORECAST_APP&&state.forecastStage==='steady'){const steady=(data.steady_history||[]).find(item=>sameModel(item.generation||item.model,target.primaryGeneration||target.name));if(steady?.source_file&&steady?.source_sheet)source={file:steady.source_file,sheet:steady.source_sheet};}
         jumpToSource(source);
       };
-      const timeSummary=root.querySelector('[data-forecast-time-summary]');if(timeSummary){const stageNow=absoluteStage(target),generated=String(DATA.meta?.generated_at||'').replace('T',' ').slice(0,16);timeSummary.textContent=`判定日期${today}（数据生成于${generated||'未知'}）；小订窗口 ${target.smallStartDate||'未维护'} ~ ${target.smallEndDate||'未维护'}（${target.smallDateSourceLabel||'来源缺失'}）；首销窗口 ${target.launchDate||'未维护'} ~ ${stageNow.end||'未维护'}，共${target.days}天（${target.dateSourceLabel}）；平销自 ${target.steadyStartDate||'缺失'} 起（${target.steadyDateSourceLabel||'来源缺失'}）`}
+      const timeSummary=(root._forecastToolbar || root).querySelector('[data-forecast-time-summary]');if(timeSummary){const stageNow=absoluteStage(target),generated=String(DATA.meta?.generated_at||'').replace('T',' ').slice(0,16);timeSummary.textContent=`判定日期${today}（数据生成于${generated||'未知'}）；小订窗口 ${target.smallStartDate||'未维护'} ~ ${target.smallEndDate||'未维护'}（${target.smallDateSourceLabel||'来源缺失'}）；首销窗口 ${target.launchDate||'未维护'} ~ ${stageNow.end||'未维护'}，共${target.days}天（${target.dateSourceLabel}）；平销自 ${target.steadyStartDate||'缺失'} 起（${target.steadyDateSourceLabel||'来源缺失'}）`}
       refreshForecastHeaderBrief(root);
       const indexedDays=[...(actual?.days||[])].filter(row=>row.date&&row.date<=today).map(row=>({...row,index:dayIndexForDate(target.launchDate,row.date)})).filter(row=>row.index>=0&&row.index<target.days).sort((a,b)=>a.index-b.index),todayIndex=stageInfo.key==='active'?stageInfo.day-1:-1,todayRow=indexedDays.find(row=>row.index===todayIndex&&row.date===today),latestHourly=[...(actual?.hourly_days||[])].filter(row=>row.date===today).sort((a,b)=>Number(a.last_hour||0)-Number(b.last_hour||0)).at(-1);let partial=null;
       if(stageInfo.key==='active'&&latestHourly)partial={...latestHourly,index:todayIndex};if(!partial&&stageInfo.key==='active'&&todayIndex>0&&todayRow)partial={...todayRow,index:todayIndex,last_hour:Math.max(0,Math.min(Number(String(DATA.meta?.generated_at||'').slice(11,13))||0,23)),from_day_snapshot:true};const fixed=indexedDays.filter(row=>row.date<today),calendarCompletedDays=stageInfo.key==='ended'?target.days:stageInfo.key==='active'?Math.max(stageInfo.day-1,0):0,actualIndexes=new Set(fixed.map(row=>row.index)),pastMissingIndexes=Array.from({length:calendarCompletedDays},(_,index)=>index).filter(index=>!actualIndexes.has(index)),historyComplete=pastMissingIndexes.length===0;
@@ -2416,7 +2446,7 @@
     };
     const activateForecastTab=(id,writeHistory=true)=>{if(!forecastViews.includes(id))return;applyForecastView(root,id);if(state.forecastStage==='launch'&&id==='evidence'){const target=targetState();root.querySelectorAll('[data-forecast-task]').forEach(card=>refreshCardExplanation(card,target));renderForecastReferenceChartV2(root,data,history)}if(writeHistory)syncUrl('push')};
     root.querySelectorAll('[data-forecast-stage-switch]').forEach(button=>button.onclick=()=>activateForecastStage(button.dataset.forecastStageSwitch));
-    const forecastTabButtons=[...root.querySelectorAll('[data-forecast-tab]')];
+    const forecastTabButtons=[...(root._forecastToolbar || root).querySelectorAll('[data-forecast-tab]')];
     forecastTabButtons.forEach(button=>{button.onclick=()=>activateForecastTab(button.dataset.forecastTab);button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const visible=forecastTabButtons.filter(tab=>!tab.hidden&&!tab.disabled),index=visible.indexOf(button),next=event.key==='Home'?0:event.key==='End'?visible.length-1:(index+(event.key==='ArrowRight'?1:-1)+visible.length)%visible.length;visible[next]?.focus();if(visible[next])activateForecastTab(visible[next].dataset.forecastTab)}});
     root.querySelectorAll('[data-forecast-score-jump]').forEach(button=>button.onclick=()=>{activateForecastTab('score');const select=root.querySelector('[data-forecast-score-task]');if(select){select.value=button.dataset.forecastScoreJump;renderScoreDashboard(targetState())}requestAnimationFrame(()=>{const detail=root.querySelector('.forecast-score-detail');if(detail){detail.tabIndex=-1;detail.focus({preventScroll:true});detail.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}})});
     let forecastUpdateTimer=null;const scheduleForecastUpdate=()=>{clearTimeout(forecastUpdateTimer);forecastUpdateTimer=setTimeout(()=>{if(root.isConnected)update()},120)};
@@ -2470,7 +2500,7 @@
         root.querySelectorAll('[data-forecast-task]').forEach(card=>updateWeightSummary(card));
         const card=control.closest('.forecast-ref-card');updatePickerCount(card);card._refreshLifecycleControls?.();
         applySystemSuggestion();root._smallForecastUpdate?.();update();
-        root.dataset.forecastDirty='true';const saved=captureForecastDraft(),feedback=root.querySelector('[data-forecast-feedback]');
+        root.dataset.forecastDirty='true';const saved=captureForecastDraft(),feedback=(root._forecastToolbar || root).querySelector('[data-forecast-feedback]');
         if(feedback){feedback.dataset.state=saved?'success':'loading';feedback.querySelector('span').textContent=name+'已恢复'+(saved?' · 本机已保存':' · 保存失败');}
       };
     });
@@ -2490,13 +2520,13 @@
         else if(field==='progressDirectCompletion')progressOverride.direct=false;
         else control.value=field==='small'?Number(actualForTarget(targetState())?.total_small??findTarget(targetState().name)?.small??0):control.defaultValue;
         applySystemSuggestion();root._smallForecastUpdate?.();update();root.dataset.forecastDirty='true';
-        const saved=captureForecastDraft(),feedback=root.querySelector('[data-forecast-feedback]');
+        const saved=captureForecastDraft(),feedback=(root._forecastToolbar || root).querySelector('[data-forecast-feedback]');
         if(feedback){feedback.dataset.state=saved?'success':'loading';feedback.querySelector('span').textContent=saved?'此项已恢复 · 本机已保存':'此项已恢复 · 保存失败';}
       };
     });
     root._syncParameterResets=()=>resetControls.forEach(control=>{control.closest('.forecast-field-control').querySelector('button').disabled=control.readOnly||control.disabled});
     root._syncParameterResets();
-    root.querySelector('[data-forecast-reset]').onclick=async()=>{
+    (root._forecastToolbar || root).querySelector('[data-forecast-reset]').onclick=async()=>{
       if(!window.confirm('清除当前车型在本机保存的人工参数，恢复本次数据的系统参数？外部预测导入不会删除。'))return;
       forecastDrafts.delete(root._forecastSubjectId);root.dataset.forecastDirty='false';const saved=persistForecastState();
       await renderPage();showToast(saved?'已清除当前车型草稿，恢复系统参数。':forecastStorageWarning);
@@ -2507,7 +2537,7 @@
       root._forecastTouched.add(forecastDraftControlKey(event.target));
       if(event.target.matches('[data-forecast-ref]'))event.target.closest('[data-forecast-task]')?.querySelectorAll('[data-forecast-ref],[data-forecast-chart-ref]').forEach(control=>root._forecastTouched.add(forecastDraftControlKey(control)));
       root.dataset.forecastDirty='true';root.setAttribute('aria-busy','true');
-      const feedback=root.querySelector('[data-forecast-feedback]');if(feedback){feedback.dataset.state='loading';feedback.querySelector('span').textContent='正在应用参数…'}
+      const feedback=(root._forecastToolbar || root).querySelector('[data-forecast-feedback]');if(feedback){feedback.dataset.state='loading';feedback.querySelector('span').textContent='正在应用参数…'}
       clearTimeout(feedbackTimer);feedbackTimer=setTimeout(()=>{
         if(!root.isConnected)return;
         root.setAttribute('aria-busy','false');
@@ -2521,10 +2551,10 @@
     root.addEventListener('click',event=>{
       const button=event.target.closest('[data-forecast-ref-quick]');if(!button)return;
       button.closest('[data-forecast-task]').querySelectorAll('[data-forecast-chart-ref]').forEach(control=>root._forecastTouched.add(forecastDraftControlKey(control)));
-      root.dataset.forecastDirty='true';const saved=captureForecastDraft(),feedback=root.querySelector('[data-forecast-feedback]');
+      root.dataset.forecastDirty='true';const saved=captureForecastDraft(),feedback=(root._forecastToolbar || root).querySelector('[data-forecast-feedback]');
       if(feedback){feedback.dataset.state=saved?'success':'loading';feedback.querySelector('span').textContent=saved?'已应用 · 本机已保存':'已应用 · 保存失败';feedback.title=forecastStorageWarning||'刷新后可恢复人工设置。'}
     });
-    if(forecastStorageWarning){const feedback=root.querySelector('[data-forecast-feedback]');feedback.dataset.state='loading';feedback.querySelector('span').textContent='本机保存不可用';feedback.title=forecastStorageWarning;}
+    if(forecastStorageWarning){const feedback=(root._forecastToolbar || root).querySelector('[data-forecast-feedback]');feedback.dataset.state='loading';feedback.querySelector('span').textContent='本机保存不可用';feedback.title=forecastStorageWarning;}
   }
   function renderUnknown(){return '<div class="empty-image">暂不支持该组件</div>'}
 
@@ -2640,6 +2670,8 @@
     const sourceText=typeof source==='string'?source:[source?.file,source?.sheet,source?.cell||source?.range,source?.note].filter(Boolean).join('｜');
     location.dataset.forecastSourceStage=state.forecastStage;
     location.querySelector('span').textContent=sourceText;location.hidden=!sourceText;
+    const menu=details.closest('.forecast-header-menu');
+    if(menu)menu.open=true;
     details.open=true;details.querySelector('summary').focus({preventScroll:true});details.scrollIntoView({block:'nearest'});
   }
   async function jumpToSource(source){
