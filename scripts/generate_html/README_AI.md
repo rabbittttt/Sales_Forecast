@@ -12,11 +12,9 @@
 
 ## 常见修改
 
-- 改某个看板：只改对应的 `modules/*.py`。
-- 调整颜色、密度、布局：改 `templates/dashboard.css`。
-- 新增一种已有组件组合：新建一个 `modules/*.py`，然后加到 `modules/registry.py` 和 `config.json`。
-- 新增一种全新图形：先在业务模块输出新 `kind`，再在 `templates/dashboard.js` 增加一个同名渲染函数。
-- 新增品牌或代际：不改代码，Sheet 名前缀符合现有命名即可。
+- 预测业务计算在 `modules/sales_forecast.py`。小订、首销和平销是同一预测模块的三个阶段，调整某阶段页面时可按下表定位其模板。
+- 顶部导航、独立页面布局和预测工作区分别在 `templates/forecast-navigation.css`、`forecast-standalone.css`、`forecast-workspace.css`。检查样式覆盖时按 `templates/dashboard.css` 中的 `@include` 顺序核对。
+- 生成主体时，`main.py` 将共享销量汇总中的目标名称交给 `core/discovery.py`。核对车型缺失时，同时检查整理表、已生成汇总和主体识别。
 
 ## 预测代码定位
 
@@ -68,12 +66,10 @@ class XxxModule:
 本项目独立维护，不沿用订单分析 Git 仓库或远端。以项目根目录 AGENTS.md 为准。
 
 ```powershell
-python -m compileall -q core modules tools main.py
-node --check templates/dashboard.js
-node --check templates/forecast-math.js
-node --check templates/forecast-import.js
-python -m unittest discover -s tests
-python main.py --no-open --check
+..\..\..\.venv\Scripts\python.exe -m compileall -q core modules tools main.py
+Get-ChildItem templates -Filter '*.js' | ForEach-Object { node --check $_.FullName; if ($LASTEXITCODE) { throw $_.Name } }
+..\..\..\.venv\Scripts\python.exe -m unittest discover -s tests
+..\..\..\.venv\Scripts\python.exe main.py --no-open --check
 ```
 
 检查本次日志是否存在异常，并验证预测主体切换、参数联动与来源说明。

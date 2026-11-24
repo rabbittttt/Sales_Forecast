@@ -91,7 +91,8 @@
 
 | 用途 | 默认位置 | 覆盖方式 |
 | --- | --- | --- |
-| 原始订单 Excel 与小订及首销数据整理表 | `../工作台数据/shared/订单汇总/` | `SHARED_DATA_ROOT` 指定共享根，生成器的 `--input` 指定本次订单输入目录 |
+| 订单 Excel | `../工作台数据/shared/订单汇总/` | `SHARED_DATA_ROOT` 指定共享根，生成器的 `--input` 指定本次订单输入目录 |
+| 小订及首销数据整理表与参考文件 | `../工作台数据/shared/订单汇总/` | 跟随共享根。独立刷新工具可用 `--source` 指定整理表；生成器的 `--input` 只切换订单输入 |
 | 车型资料 | `../工作台数据/shared/车型信息/` | 跟随共享根，已维护的车型属性优先取整理表 |
 | 派生销量汇总 | `../工作台数据/shared/订单汇总/鸿蒙智行销量数据汇总.xlsx` | 跟随共享根，独立刷新工具支持 `--output` |
 | 静态 HTML 与日志 | `output_file/static/鸿蒙智行销量预测.html`、同级 `log/` | 生成器 `--output`、`--log-dir` |
@@ -109,7 +110,7 @@
 
 ## 维护
 
-在项目根目录运行 `python scripts/asset_index.py`，可刷新本机的 `output_file/maintenance/资产索引.html`，按关键词检索文件、用途、最后更新时间和仓内引用。索引与本机归档均放在 Git 忽略的输出目录；目录外的离线网页是否引用了某份资源，需按交付记录核实。
+在项目根目录运行 `..\.venv\Scripts\python.exe scripts/asset_index.py`，可刷新本机的 `output_file/maintenance/资产索引.html`，按关键词检索文件、用途、最后更新时间和仓内引用。索引与本机归档均放在 Git 忽略的输出目录；目录外的离线网页是否引用了某份资源，需按交付记录核实。
 
 配置：`scripts/generate_html/config.json`。
 算法：`scripts/generate_html/modules/sales_forecast.py`。
@@ -125,9 +126,7 @@
 ```powershell
 cd scripts/generate_html
 ..\..\..\.venv\Scripts\python.exe -m compileall -q core modules tools main.py
-node --check templates/dashboard.js
-node --check templates/forecast-math.js
-node --check templates/forecast-import.js
+Get-ChildItem templates -Filter '*.js' | ForEach-Object { node --check $_.FullName; if ($LASTEXITCODE) { throw $_.Name } }
 ..\..\..\.venv\Scripts\python.exe -m unittest discover -s tests
 ..\..\..\.venv\Scripts\python.exe main.py --no-open --check
 ```
