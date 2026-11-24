@@ -108,6 +108,22 @@ class InputSnapshotTests(TestCase):
         source.write_bytes(b"model dates")
         self.assertNotEqual(configured, self.scan())
 
+    def test_config_change_with_unchanged_length_and_mtime_is_observed(self):
+        self.config.write_text('{"forecast_as_of_date":"2026-11-12"}', encoding="utf-8")
+        before = self.scan()
+        info = self.config.stat()
+        self.config.write_text('{"forecast_as_of_date":"2026-11-13"}', encoding="utf-8")
+        os.utime(self.config, ns=(info.st_atime_ns, info.st_mtime_ns))
+        self.assertNotEqual(before, self.scan())
+
+    def test_mixed_case_extension_is_scanned_and_xlsx_directory_is_ignored(self):
+        source = self.orders / "orders.XlSx"
+        source.write_bytes(b"orders")
+        (self.orders / "folder.xlsx").mkdir()
+        paths = [name for name, _, _ in self.scan().files]
+        self.assertIn(str(source.resolve()), paths)
+        self.assertNotIn(str((self.orders / "folder.xlsx").resolve()), paths)
+
     def test_reinstalling_identical_config_does_not_trigger_a_refresh(self):
         baseline = self.scan()
         self.config.write_text('{ // same effective settings\n}', encoding="utf-8")

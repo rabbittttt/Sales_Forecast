@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class ForecastStudioTests(unittest.TestCase):
     def js(self, body):
         setup = r'''
-const fs=require('fs'),source=fs.readFileSync('templates/dashboard.js','utf8');
+const fs=require('fs'),source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
 const fmt=value=>Number(value).toLocaleString('zh-CN');
 const section=(a,b)=>source.slice(source.indexOf(a),source.indexOf(b,source.indexOf(a)));

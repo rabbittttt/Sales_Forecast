@@ -1,4 +1,5 @@
 """Confirmed terminal zero, independently dated SKU blocks and safe HTML output."""
+from core.template_assets import read_template
 import json
 from pathlib import Path
 import re
@@ -31,7 +32,7 @@ class ConfirmedLockTerminalTests(TestCase):
 
     @skipUnless(shutil.which('node'), 'Node.js required')
     def test_ended_fallback_distinguishes_zero_unknown_and_mismatched_values(self):
-        source = (ROOT / 'templates/dashboard.js').read_text(encoding='utf-8')
+        source = read_template(ROOT / "templates/dashboard.js")
         expression = re.search(r'endedLockReference=(.*?),actualLock=', source)[1]
         script = r'''
 const choose=new Function('stageInfo','completeLock','historyList','target','actualGross','sameModel','return '+JSON.parse(process.argv[1]));

@@ -1,8 +1,8 @@
 // End-to-end interactions on the actual main.py output, with isolated browser storage.
 const fs=require('fs'),path=require('path'),assert=require('assert'),{pathToFileURL}=require('url');
-const project=path.resolve(__dirname,'../../..'),{chromium}=require(process.env.PLAYWRIGHT_MODULE||path.join(project,'.test_runtime/node_modules/playwright'));
+const project=path.resolve(__dirname,'../../../..'),{chromium}=require(process.env.PLAYWRIGHT_MODULE||path.join(project,'.test_runtime/node_modules/playwright'));
 const out=path.join(project,'.test_outputs/ui_audit_20261002/after');
-const base=pathToFileURL(path.join(project,'output_file/鸿蒙智行订单分析汇总.html'));
+const base=pathToFileURL(process.env.LEGACY_ORDER_HTML || path.join(project,'output_file/鸿蒙智行订单分析汇总.html'));
 (async()=>{
  fs.mkdirSync(out,{recursive:true});const browser=await chromium.launch({headless:true,channel:'msedge'});
  const page=await browser.newPage({viewport:{width:1440,height:1000},timezoneId:'Asia/Shanghai',reducedMotion:'reduce'}),checks=[],errors=[];

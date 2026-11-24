@@ -75,7 +75,7 @@ async function run(){
     check('独立入口只提供代际车型',await page.locator('#subjectSelect').evaluate(select=>[...select.options].length>0&&[...select.options].every(option=>window.DASHBOARD_DATA.subjects.find(s=>s.id===option.value)?.type==='generation')));
     check('独立入口不引用订单页面或旧草稿',await page.evaluate(()=>['order_page','forecast_page','forecast_legacy_page'].every(key=>!Object.hasOwn(window.DASHBOARD_DATA,key))));
     check('独立页面只含预测业务块',await page.evaluate(()=>window.DASHBOARD_DATA.app_mode==='forecast'&&Object.keys(window.DASHBOARD_BLOCKS_B64).every(key=>key.endsWith('|sales_forecast'))));
-    check('首次进入不加载底表行或整本Excel',!requests.some(value=>value.includes('/forecast_assets/'))&&await page.evaluate(()=>Object.keys(window.DASHBOARD_RAW_B64).length===0));
+    check('首次进入不加载底表行或整本Excel',!requests.some(value=>value.includes('/forecast_assets/'))&&await page.evaluate(()=>window.DASHBOARD_RAW_B64===undefined));
     for(const stage of ['small','steady','launch']){
       await page.locator('[data-forecast-nav="'+stage+'"]').click();
       await page.waitForSelector('[data-forecast-stage-pane="'+stage+'"].active');
@@ -150,7 +150,7 @@ async function run(){
     await titleMenu.locator(':scope > summary').press('Escape');
     check('标题栏详情支持恢复推荐、Esc 和键盘焦点返回', await titleMenu.evaluate(menu =>
       !menu.open && document.activeElement === menu.querySelector('summary')));
-    check('独立页不发布底表数据',await page.evaluate(()=>window.DASHBOARD_DATA.raw_files.length===0&&Object.keys(window.DASHBOARD_DATA.raw_block_urls).length===0&&Object.keys(window.DASHBOARD_RAW_B64).length===0));
+    check('独立页不发布底表数据',await page.evaluate(()=>window.DASHBOARD_DATA.raw_files.length===0&&Object.keys(window.DASHBOARD_DATA.raw_block_urls).length===0&&window.DASHBOARD_RAW_B64===undefined));
     await page.goto(url(forecastName,{...forecastParams,module:'raw',rawFile:'旧底表.xlsx',rawSheet:'旧表'}));await ready(page);
     check('旧底表链接转回预测并保留车型和草稿',new URL(page.url()).searchParams.get('module')==='sales_forecast'&&await page.locator('#subjectSelect').evaluate(n=>n.selectedOptions[0].textContent)===target&&await conversion.inputValue()==='41.2');
     check('未请求底表资源',!requests.some(value=>value.includes('/forecast_assets/')));

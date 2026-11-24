@@ -14,7 +14,7 @@ class StageCalendarWiringTests(unittest.TestCase):
     def baseline(self, launch_factor, steady_factor):
         setup = r'''
 const fs=require('fs'),math=require('./templates/forecast-math.js');
-const source=fs.readFileSync('templates/dashboard.js','utf8');
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const lines=source.split('\n'),line=marker=>lines.find(text=>text.includes(marker));
 const target={launchDate:'2026-01-01',endDate:'2026-01-03',steadyStartDate:'2026-01-04'};
 const rows=[1,2,3].map(day=>({date:'2026-01-0'+day,gross:100,direct:80,lock:50}));

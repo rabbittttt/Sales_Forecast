@@ -13,7 +13,7 @@ class LaunchObservedLockFloorTests(unittest.TestCase):
     def run_cases(self, cases):
         script = r'''
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
-const source=fs.readFileSync('templates/dashboard.js','utf8');
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const math=require('./templates/forecast-math.js');
 const section=(a,b)=>{const i=source.indexOf(a),j=source.indexOf(b,i+a.length);assert(i>=0&&j>i);return source.slice(i,j)};
 const actuals=section('      const sum=field=>resolvedFixed.reduce(', '      const hourlyFallbackUsed=');

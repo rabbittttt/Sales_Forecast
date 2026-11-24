@@ -7,14 +7,17 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
+import os
 from pathlib import Path
 import re
 import sqlite3
+import stat
 import threading
 import time
 from typing import Callable
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from core.live_versions import previous_published_page
 from core.external_imports import ImportConflict, ImportStore, valid_text
 from core.config import SUMMARY_REUSE_UNAVAILABLE, load_config
 from core.data_paths import (
@@ -39,59 +42,34 @@ def scan_inputs(input_dir: Path, project_root: Path = PROJECT_ROOT) -> InputSnap
     optional = model_information_directory(project_root)
     if optional.exists():
         roots.add(optional.resolve())
-    paths = set()
+    workbooks = {}
     for root in roots:
-        # iterdir raises on missing/unavailable source directories.
-        for path in root.iterdir():
-            if (path.suffix.lower() == ".xlsx" and path.is_file()
-                    and not path.name.startswith(("~$", "."))
-                    and path.name != FORECAST_SUMMARY_NAME):
-                paths.add(path.resolve())
+        # On Windows scandir already returns size/mtime for ordinary files.
+        # Keep canonical identities for links, as earlier snapshots used resolved paths.
+        with os.scandir(root) as entries:
+            for entry in entries:
+                name = entry.name
+                if name.startswith(("~$", ".")) or name == FORECAST_SUMMARY_NAME or not name.lower().endswith(".xlsx"):
+                    continue
+                try:
+                    info = entry.stat()
+                except FileNotFoundError:
+                    continue  # A broken link or a file removed during the scan.
+                if not stat.S_ISREG(info.st_mode):
+                    continue
+                path = Path(entry.path)
+                if entry.is_symlink() or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                    path = path.resolve()
+                workbooks[path] = (info.st_size, info.st_mtime_ns)
     config_path = Path(project_root) / "scripts" / "generate_html" / "config.json"
     config = load_config(config_path)
     # The release directory/mtime can change on deployment with identical config.
     # The parsed settings are also the values used for the business-day decision.
     settings = json.dumps(config, sort_keys=True, ensure_ascii=False).encode("utf-8")
     facts = [("config.json", len(settings), int.from_bytes(hashlib.sha256(settings).digest(), "big"))]
-    for path in sorted(paths):
-        stat = path.stat()
-        facts.append((str(path), stat.st_size, stat.st_mtime_ns))
+    facts.extend((str(path), *workbooks[path]) for path in sorted(workbooks))
     return InputSnapshot(str(config.get("forecast_as_of_date") or date.today().isoformat()),
                          tuple(facts))
-
-
-def previous_published_page(live_dir: Path) -> bytes | None:
-    """Find the latest verified page for this input directory across versions."""
-    source_dir = live_dir.parent
-    candidates = []
-    try:
-        versions = list(source_dir.iterdir())
-    except OSError:
-        return None
-    for version in versions:
-        if version == live_dir or not re.fullmatch(r"[0-9a-f]{64}", version.name):
-            continue
-        checkpoint = version / (FORECAST_PAGE_NAME + ".state.json")
-        try:
-            if version.resolve() != version or checkpoint.resolve() != checkpoint:
-                continue
-            candidates.append((checkpoint.stat().st_mtime_ns, checkpoint))
-        except OSError:
-            continue
-    for _, checkpoint in sorted(candidates, reverse=True):
-        page = checkpoint.with_name(FORECAST_PAGE_NAME)
-        try:
-            if page.resolve() != page:
-                continue
-            saved = json.loads(checkpoint.read_text(encoding="utf-8"))
-            if not isinstance(saved, dict) or saved.get("schema_version") != 1:
-                continue
-            content = page.read_bytes()
-            if content and hashlib.sha256(content).hexdigest() == saved.get("revision"):
-                return content
-        except (OSError, ValueError):
-            continue
-    return None
 
 
 def _input_changes(old: InputSnapshot, new: InputSnapshot) -> tuple[str, bool]:
@@ -311,9 +289,12 @@ class LiveMonitor:
         self._next_scan = finished + self.scan_interval
         LOGGER.info("动态预测已更新")
 
-    def run(self, stop: threading.Event) -> None:
+    def run(self, stop: threading.Event, on_first_ready: Callable[[], None] | None = None) -> None:
         while not stop.is_set():
             self.tick()
+            if on_first_ready is not None and self.status()["state"] == "ready":
+                on_first_ready()
+                on_first_ready = None
             stop.wait(5)
 
 

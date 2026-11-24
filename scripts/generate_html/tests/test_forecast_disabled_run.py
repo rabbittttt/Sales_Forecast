@@ -44,7 +44,6 @@ class ForecastDisabledRunTests(unittest.TestCase):
                 stack.enter_context(patch.object(generator, "forecast_target_names", return_value=[]))
                 stack.enter_context(patch.object(generator, "forecast_summary_path", return_value=root / "shared" / generator.SUMMARY_NAME))
                 stack.enter_context(patch.object(generator, "MODULES", modules))
-                stack.enter_context(patch.object(generator, "raw_tables", return_value=([], {})))
                 stack.enter_context(patch.object(generator, "add_kpi_comparisons"))
                 stack.enter_context(patch.object(generator, "validate_manifest", return_value=[]))
                 stack.enter_context(patch.object(generator, "render_dashboard", side_effect=lambda *args: output.write_text("generated", encoding="utf-8")))

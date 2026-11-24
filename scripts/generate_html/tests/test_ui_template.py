@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.template_assets import read_template
 
 import re
 import shutil
@@ -17,7 +18,7 @@ class DashboardTemplateTests(unittest.TestCase):
         node = shutil.which('node')
         if not node:
             self.skipTest('Node unavailable')
-        script = (ROOT / 'templates/dashboard.js').read_text(encoding='utf-8')
+        script = read_template(ROOT / "templates/dashboard.js")
         formatter = script[script.index('  const displayText ='):script.index('  const colors =')]
         checks = r'''
 const assert=require('assert');
@@ -33,7 +34,7 @@ assert.strictEqual(fmt(null),'');
         node = shutil.which("node")
         if not node:
             self.skipTest("Node unavailable")
-        script = (ROOT / "templates/dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         runtime = script[script.index("  const displayText ="):script.index("  const RHYTHM_LAYOUT=")]
         runtime += script[script.index("  function renderSkuHeatmap("):script.index("  function renderComboHeatmap(")]
         runtime += script[script.index("  function renderComboMatrix("):script.index("  function cumulative(")]
@@ -59,7 +60,7 @@ assert(!matrix.includes('NaN')&&!matrix.includes('Infinity')&&!tail.includes('Na
 
     @staticmethod
     def rhythm_runtime():
-        script = (ROOT / "templates/dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         helpers = script[script.index("  const displayText ="):script.index("  function avoidLabelY(")]
         adapters = script[script.index("  function renderLaunch(data){"):script.index("  function renderColumns(rows,color){")]
         return helpers + adapters
@@ -111,8 +112,8 @@ assert(rates.includes('D2 · 当日直接大定 20 · 当日小订转大 10 · �
         subprocess.run([node, '-e', self.rhythm_runtime() + checks], check=True, capture_output=True)
 
     def test_rhythm_charts_use_shared_compact_presentation(self):
-        script = (ROOT / "templates/dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates/dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         adapters = script[script.index('  function renderLaunch(data){'):script.index('  function renderColumns(rows,color){')]
         self.assertEqual(adapters.count('return renderRhythmChart('), 5)
         self.assertNotIn('<svg', adapters)
@@ -228,7 +229,7 @@ assert(!/data-rhythm-label="segment"[^>]*>1<\/text>/.test(launchHtml),'too-small
         subprocess.run([node, "-e", self.rhythm_runtime() + checks], check=True, capture_output=True)
 
     def test_day_period_selector_uses_chronological_order(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         sorter = script[script.index("function sortPeriods"):script.index("async function renderFilters")]
         self.assertIn("return pa-pb;", sorter)
         self.assertNotIn("return pb-pa;", sorter)
@@ -243,50 +244,14 @@ assert(!/data-rhythm-label="segment"[^>]*>1<\/text>/.test(launchHtml),'too-small
         self.assertNotIn('write_text("\\n".join(warnings)', main)
         self.assertIn('legacy_warning_file.unlink()', main)
 
-    def test_raw_table_supports_freezing_first_row_and_title_columns(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
-        self.assertIn("rawFreezeRow:true,rawFreezeColumn:false,rawFreezeFirstColumn:true", script)
-        self.assertIn('aria-label="锁窗格"', script)
-        self.assertIn('id="rawFreezeRow"', script)
-        self.assertIn('id="rawFreezeColumn"', script)
-        self.assertIn('id="rawFreezeFirstColumn"', script)
-        self.assertIn("锁定标题列", script)
-        self.assertIn('classList.toggle("freeze-row",state.rawFreezeRow)', script)
-        self.assertIn('classList.toggle("freeze-column",state.rawFreezeColumn||state.rawFreezeFirstColumn)', script)
-        self.assertIn("function rawCellIsData(value)", script)
-        self.assertIn("function rawTitleColumnCount(rows)", script)
-        self.assertIn("function applyRawFrozenColumns(rows)", script)
-        self.assertIn('data-raw-col="${col}"', script)
-        self.assertIn("applyRawFrozenColumns(filtered)", script)
-        self.assertIn(".raw-table.freeze-row .data-table th", css)
-        self.assertIn(".raw-table.freeze-column .data-table .raw-frozen-column", css)
-        self.assertIn(".raw-table.freeze-row.freeze-column .data-table th.raw-frozen-column", css)
-        node = shutil.which("node")
-        if not node:
-            self.skipTest("Node unavailable")
-        runtime = script[script.index("  function rawCellIsData"):script.index("  function renderRawTable")]
-        checks = r'''
-const assert=require('assert'),state={rawFreezeColumn:true,rawFreezeFirstColumn:false},frames=[];
-const classes=()=>({values:new Set(),add(...names){names.forEach(name=>this.values.add(name))},remove(...names){names.forEach(name=>this.values.delete(name))},toggle(name,on){on?this.values.add(name):this.values.delete(name)}});
-const cells=Array.from({length:4},(_,col)=>({col,classList:classes(),style:{removeProperty(name){delete this[name]}},getBoundingClientRect(){return {width:100}}}));
-const root={isConnected:true,classList:classes(),querySelectorAll(selector){return selector.startsWith('[data-raw-col=')?cells.filter(cell=>cell.col===Number(selector.match(/"(\d+)"/)[1])):cells.filter(cell=>cell.classList.values.has('raw-frozen-column'))}};
-const $=()=>root,requestAnimationFrame=callback=>frames.push(callback),flush=()=>{while(frames.length)frames.shift()()},frozen=()=>cells.filter(cell=>cell.classList.values.has('raw-frozen-column')).map(cell=>cell.col);
-const rows=[['品牌','车型','数量','占比'],['问界','M9',12,.5]],before=JSON.stringify(rows);
-applyRawFrozenColumns(rows);flush();assert.deepEqual(frozen(),[0,1],'title mode preserves multiple title columns');
-state.rawFreezeColumn=false;state.rawFreezeFirstColumn=true;applyRawFrozenColumns(rows);flush();assert.deepEqual(frozen(),[0]);
-applyRawFrozenColumns([['编号','名称'],[1,'门店']]);flush();assert.deepEqual(frozen(),[0],'first column freezes even when numeric');
-state.rawFreezeColumn=true;state.rawFreezeFirstColumn=false;applyRawFrozenColumns(rows);
-state.rawFreezeColumn=false;state.rawFreezeFirstColumn=true;applyRawFrozenColumns(rows);flush();assert.deepEqual(frozen(),[0],'stale animation frame must not restore title columns');
-applyRawFrozenColumns(rows);state.rawFreezeFirstColumn=false;applyRawFrozenColumns(rows);flush();assert.deepEqual(frozen(),[],'turning off before paint stays off');
-state.rawFreezeFirstColumn=true;applyRawFrozenColumns([]);flush();assert.deepEqual(frozen(),[],'empty tables are safe');
-assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values');
-'''
-        subprocess.run([node, "-e", runtime + checks], check=True, capture_output=True)
+    def test_forecast_runtime_omits_raw_workbook_navigation_and_downloads(self):
+        script = read_template(ROOT / "templates/dashboard.js")
+        for name in ("getRawBlock(", "renderRaw()", "exportRawWorkbook(", "DASHBOARD_RAW_B64"):
+            self.assertNotIn(name, script)
 
     def test_sales_forecast_has_three_lifecycle_stages(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         self.assertIn('{id:"small",label:"小订预测"}', script)
         self.assertIn('{id:"launch",label:"首销预测"}', script)
         self.assertIn('{id:"steady",label:"平销预测"}', script)
@@ -348,15 +313,15 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn("min-height:44px", css)
 
     def test_forecast_calendar_is_automatic(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertNotIn('data-forecast-allocation="holidays"', script)
         self.assertIn("adjustedWorkdays", script)
         self.assertIn("周末调休按工作日处理", script)
 
     def test_filters_are_the_last_control_group_in_the_topbar(self):
         template = (ROOT / "templates" / "dashboard.html").read_text(encoding="utf-8")
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         topbar = template.split('<header class="topbar">', 1)[1].split("</header>", 1)[0]
         self.assertIn('class="topbar-main"', topbar)
         self.assertIn('<section class="filters" id="filters"', topbar)
@@ -382,8 +347,8 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
 
     def test_topbar_keeps_generated_time_and_compacts_small_screen_filters(self):
         template = (ROOT / "templates" / "dashboard.html").read_text(encoding="utf-8")
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         topbar = template.split('<header class="topbar">', 1)[1].split("</header>", 1)[0]
         self.assertIn('id="updatedAt"', topbar)
         self.assertIn('select id="subjectSelect" aria-label="分析主体"', topbar)
@@ -414,11 +379,11 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_non_temporal_modules_keep_static_time_filter_placeholders(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         self.assertIn('$("#grainSelect").closest(".filter-group").style.display=""', script)
         self.assertNotIn('$("#grainSelect").closest("label")', script)
-        self.assertIn('["sales_forecast","generic","raw"].includes(state.module)', script)
+        self.assertIn('["sales_forecast","generic"].includes(state.module)', script)
         self.assertIn("Object.entries(DATA.config.grain_labels)", script)
         self.assertIn("按预测阶段窗口", script)
         self.assertIn("按所选表格范围", script)
@@ -429,7 +394,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
 
     def test_navigation_is_a_single_left_sidebar(self):
         template = (ROOT / "templates" / "dashboard.html").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        css = read_template(ROOT / "templates/dashboard.css")
         self.assertIn('<div class="app-shell">', template)
         self.assertIn('<aside class="module-bar">', template)
         self.assertIn("grid-template-columns:120px minmax(0,1fr)", css)
@@ -449,7 +414,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertEqual(config["module_order"], ["sales_forecast"])
 
     def test_generated_chart_renderers_include_visible_data_labels(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn('class="rhythm-value-label rhythm-', script)
         self.assertIn('data-rhythm-label', script)
         self.assertIn("segment-data-labels", script)
@@ -463,8 +428,8 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn('replace(/[ T]00:00:00$/, "")', script)
 
     def test_pie_charts_show_direct_percentage_labels(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         renderer = script[script.index("function renderPieChart"):script.index("function renderStructureCards")]
         self.assertIn("const sliceLabels=source.map", renderer)
         self.assertIn('class="pie-slice-label"', renderer)
@@ -475,8 +440,8 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn('aria-label="占比圆环图"', renderer)
 
     def test_chart_labels_use_requested_colors_without_halo(self):
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = read_template(ROOT / "templates/dashboard.css")
+        script = read_template(ROOT / "templates/dashboard.js")
         label = re.search(r"\.chart-data-label\s*\{([^}]*)\}", css, re.S)
         on_color = re.search(r"\.chart-data-label\.on-color\s*\{([^}]*)\}", css, re.S)
         total = re.search(r"\.chart-data-label\.total-label\s*\{([^}]*)\}", css, re.S)
@@ -491,8 +456,8 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertNotRegex(script, r'class="chart-data-label[^\n>]*"[^>]*\sfill=')
 
     def test_chart_labels_have_headroom_and_collision_avoidance(self):
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = read_template(ROOT / "templates/dashboard.css")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn("const LABEL_SCALE_HEADROOM=1.18", script)
         self.assertIn("function avoidLabelY", script)
         self.assertIn("maxValue:chartMax(data.map(row=>row.count))", script)
@@ -502,7 +467,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn("color:var(--ink-2)", css)
 
     def test_stacked_trend_uses_requested_palette_in_series_order(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         palette = '["#FFF2CC","#E2F0D9","#C8E8E8","#A8D8EA","#A0C1E8","#DCC5ED","#F0C8C8","#F8D8B0"]'
         self.assertIn(f"const stackedTrendPalette={palette}", script)
         self.assertIn("seriesFill=index=>stackedTrendPalette[index%stackedTrendPalette.length]", script)
@@ -510,15 +475,15 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertNotRegex(script, r"seriesFill=.*纯电")
 
     def test_stacked_trend_places_series_from_top_to_bottom(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn("const rates=series.map(item=>Math.max(0,Number(item.values[index]||0)))", script)
         self.assertIn("let y=bottom-stackHeight", script)
         self.assertIn("segmentY=y;y+=height", script)
         self.assertIn('y="${segmentY}"', script)
 
     def test_stacked_trend_uses_plain_segment_labels_and_no_line_markers(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         renderer = script[script.index("function renderStackedTrend"):script.index("function renderTable")]
         self.assertIn('class="chart-data-label stack-segment-label"', renderer)
         self.assertIn('(rate*100).toFixed(0)', renderer)
@@ -536,7 +501,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn(".stacked-chart .chart-data-label.stack-segment-label {\n  font-size:var(--type-note);", css)
 
     def test_overview_stacked_trends_default_to_latest_period(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn("function alignOverviewChartScrollbars()", script)
         self.assertIn('if(state.module!=="overview")return;', script)
         self.assertIn('document.querySelectorAll("#page .stacked-chart")', script)
@@ -545,7 +510,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn("alignOverviewChartScrollbars();", script)
 
     def test_svg_stacked_bars_use_square_corners(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         renderers = [
             ("function renderRhythmSvg", "function renderRhythmChart"),
             ("function renderStackedTrend", "function renderTable"),
@@ -558,7 +523,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
             self.assertNotRegex(renderer, r"<rect[^>]*\brx=", msg=f"rounded corner in {start}")
 
     def test_sales_forecast_uses_and_syncs_the_top_subject_selector(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn('moduleId==="sales_forecast"', script)
         self.assertIn('item?.type==="generation"&&(item.modules.includes(moduleId)||DATA.subjects.some', script)
         self.assertNotIn('state.module==="sales_forecast"&&item.type!=="generation"', script)
@@ -573,7 +538,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         node = shutil.which('node')
         if not node:
             self.skipTest('Node unavailable')
-        script = (ROOT / 'templates/dashboard.js').read_text(encoding='utf-8')
+        script = read_template(ROOT / "templates/dashboard.js")
         availability = script[script.index('  const moduleAvailable='):script.index('  function forecastDataFromBoard')]
         loader = script[script.index('  const boardCache={}'):script.index('  function subject()')]
         navigation = script[script.index('  async function ensureState()'):script.index('  function renderSubjectSelect()')]
@@ -595,21 +560,21 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
             if((await getDashboard('new-car','sales_forecast')).payload!=='shared')throw Error('shared payload lost');
             await ensureState();if(state.module!=='overview')throw Error('group fallback invalid');
             state.subject='brand';state.module='sales_forecast';await ensureState();
-            if(state.module!=='raw')throw Error('unavailable forecast selected as fallback');
+            if(state.module!==null)throw Error('unavailable forecast selected as fallback');
         })().catch(error=>{console.error(error);process.exitCode=1});
         """
         subprocess.run([node, '-e', setup + availability + loader + navigation + checks],
                        text=True, encoding='utf-8', capture_output=True, check=True)
 
     def test_sales_forecast_vehicle_and_launch_settings_are_always_visible(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         self.assertNotIn('forecast-target-editor', script)
         self.assertIn('<div class="forecast-target-form">', script)
         self.assertIn('.forecast-workspace.forecast-v2 .forecast-target>.forecast-target-form{grid-template-columns:repeat(7', css)
 
     def test_sales_forecast_frontend_uses_backend_vehicle_mapping(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
         self.assertIn("modelAliases=data.model_aliases||{}", script)
         self.assertIn("const forecastModelAliases=()=>", script)
@@ -621,7 +586,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertNotIn("问界|智界|享界|尊界|尚界", script.split("const rawForecastModelKey=", 1)[1].split(";", 1)[0])
 
     def test_sales_forecast_never_inherits_another_targets_parameters(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         linked = script.split("function linkedForecastData(data)", 1)[1].split("function linkedForecastSource", 1)[0]
         self.assertNotIn("original.total_small", linked)
         self.assertNotIn("original.conversion", linked)
@@ -629,7 +594,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn("total_small:Number(option.small??0)", linked)
 
     def test_sales_forecast_separates_observable_structure_from_reference_completion(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
         refresh = (ROOT / "tools" / "refresh_sales_forecast_data.py").read_text(encoding="utf-8")
         self.assertIn("结构、斜率和累计曲线只比较真实已发生部分", script)
@@ -647,7 +612,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn("D1大定按阶段顺序逐字段回退后仍缺失", script)
 
     def test_sales_forecast_combines_progress_curves_and_uses_parameter_lines(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn("参考确认后的小转大预测完成度", script)
         self.assertIn("参考确认后的直接大定预测完成度", script)
         self.assertIn("截至各日真实累计量÷方法一预测终局", script)
@@ -664,7 +629,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn("逐日累计直接大定 ÷ 逐日累计总大定", script)
 
     def test_sales_forecast_attribute_dropdowns_only_use_vehicle_master_values(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
         self.assertIn("const tierValues=[...new Set([target.tier,...(data.tiers||[])", script)
         self.assertIn("const nodeValues=[...new Set([target.launch_node,...(data.nodes||[])", script)
@@ -673,8 +638,8 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn('"nodes": _master_values(model_master, "发布类型")', module)
 
     def test_sales_forecast_has_a_scoring_tab_backed_by_the_real_score_function(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         self.assertIn('data-forecast-tab="score">预测打分</button>', script)
         self.assertIn('data-forecast-pane="score"', script)
         self.assertIn("const scoreSpecs=", script)
@@ -694,7 +659,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertIn(".forecast-score-detail-table th:nth-child(2),.forecast-score-detail-table td:nth-child(2){width:210px;min-width:210px;max-width:210px;white-space:normal;overflow-wrap:anywhere}", css)
 
     def test_small_and_steady_score_pages_explain_the_actual_ranking(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
         self.assertIn("function renderLifecycleScorePage", script)
         self.assertIn("const smallScoreRules=", script)
@@ -714,7 +679,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertNotIn("最近2至4周稳健周均", module)
 
     def test_lifecycle_result_and_evidence_share_launch_structure(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         lifecycle = script[script.index("function renderSmallOrderWorkspace"):script.index("function renderForecastWorkspaceV2")]
         self.assertEqual(lifecycle.count("renderLifecycleConclusion("), 2)
         self.assertEqual(lifecycle.count('class="forecast-result-main"'), 2)
@@ -730,8 +695,8 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
         self.assertNotIn("data-steady-evidence]').innerHTML='<p>", script)
 
     def test_small_and_steady_evidence_use_the_prediction_curves(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         self.assertIn("function renderLifecycleLineChart", script)
         self.assertIn("data-small-reference-chart", script)
         self.assertIn("data-steady-reference-chart", script)
@@ -757,7 +722,7 @@ assert.equal(JSON.stringify(rows),before,'freezing does not modify cell values')
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required for chart rendering checks")
     def test_shared_evidence_chart_preserves_zero_missing_units_and_accessibility(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         helpers = script[script.index("  function renderForecastEvidenceLines("):script.index("  function renderLifecycleScorePage(")]
         checks = r"""
 const assert=require('node:assert/strict');
@@ -790,7 +755,7 @@ assert(renderLifecycleLineChart({...args,series:[],empty:'缺少D1分时'}).incl
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required for chart rendering checks")
     def test_forecast_result_charts_keep_all_values_at_a_compact_natural_size(self):
-        script = (ROOT / "templates/dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         helpers = script[script.index("  const displayText ="):script.index("  const colors =")]
         helpers += script[script.index("  function renderForecastQuantityChart("):script.index("  function renderForecastDecisionChartV2(")]
         helpers += script[script.index("  function renderForecastEvidenceLines("):script.index("  function compactForecastScorePage(")]
@@ -827,8 +792,8 @@ for(const length of [1,7,35,120]){
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_sales_forecast_result_layout_stays_expanded_and_uses_horizontal_space(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         script = script[script.index('function renderForecastWorkspaceV2'):]
         scenarios = script.index('data-forecast-region="summary"')
         parameters = script.index('data-forecast-region="parameters"')
@@ -852,7 +817,7 @@ for(const length of [1,7,35,120]){
         self.assertNotIn('<details class="forecast-parameter-rail">', script)
 
     def test_forecast_stage_errors_are_top_aligned_and_common_controls_precede_curves(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         small = script[script.index("function renderSmallOrderWorkspace"):script.index("function renderSteadyWorkspace")]
         steady = script[script.index("function renderSteadyWorkspace"):script.index("function renderForecastWorkspaceV2")]
         launch = script[script.index("data-forecast-data-error"):script.index("data-forecast-pane=\"score\"")]
@@ -869,8 +834,8 @@ for(const length of [1,7,35,120]){
         self.assertLess(launch.index('<section class="forecast-scale-check">'), launch.index("renderBridgeControls('launch')"))
 
     def test_bridge_controls_use_a_compact_parameter_layout(self):
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = read_template(ROOT / "templates/dashboard.css")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn("[data-bridge-stage] .forecast-day-allocation{margin-top:0;padding:8px 10px", css)
         self.assertIn("[data-bridge-stage] .forecast-allocation-inputs{grid-template-columns:repeat(3", css)
         self.assertIn("[data-bridge-stage]>label{display:grid;grid-template-columns:minmax(150px,.38fr)", css)
@@ -879,7 +844,7 @@ for(const length of [1,7,35,120]){
         self.assertIn("min-height:29px", css)
 
     def test_steady_missing_lock_days_cover_the_full_steady_period(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn("expectedSteadyDates=steadyElapsedDays?Array.from", script)
         self.assertIn("const compactMissingRanges=dates=>", script)
         self.assertIn("已结束日交车锁单缺失或无效", script)
@@ -892,7 +857,7 @@ for(const length of [1,7,35,120]){
         self.assertNotIn("当前周已结束日锁单缺失或异常", script)
 
     def test_daily_base_curve_explanation_matches_allocation_logic(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
         self.assertIn("首销每日大定相对D1（基础曲线）", script)
         self.assertIn("root._forecastDailyEvidence={adaptedDailyOrders,naturalDailyOrders,historicalFactor}", script)
@@ -903,8 +868,8 @@ for(const length of [1,7,35,120]){
         self.assertIn("两种方法均用主辅加权后的基础曲线衔接前一真实日", module)
 
     def test_sales_forecast_evidence_uses_compact_reference_comparison_table(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         self.assertIn("参与打分参数", script)
         self.assertIn("当前 · ${esc(target.name)}", script)
         self.assertIn("主参考 · ${esc(name(selected[0],'未选择'))}", script)
@@ -918,7 +883,7 @@ for(const length of [1,7,35,120]){
         self.assertNotIn("reason.textContent=selected.length", script)
 
     def test_sales_forecast_score_explanations_match_the_components_used(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn("D2小转大/D2大定", script)
         self.assertIn("D1小转大占前两日", script)
         self.assertIn("D1直接大占前两日", script)
@@ -928,7 +893,7 @@ for(const length of [1,7,35,120]){
         self.assertNotIn("得分${Math.round(part.value*100)}", script)
 
     def test_sales_forecast_six_logic_fixes_are_observable(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
         refresh = (ROOT / "tools" / "refresh_sales_forecast_data.py").read_text(encoding="utf-8")
         self.assertIn("parameterRawSmall", script)
@@ -938,7 +903,7 @@ for(const length of [1,7,35,120]){
         self.assertIn("不参与参考车型评分", script)
 
     def test_sales_forecast_has_one_interactive_calculation_owner(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
         self.assertNotIn("def _match_score", module)
         self.assertNotIn("def _recommendations", module)
@@ -948,7 +913,7 @@ for(const length of [1,7,35,120]){
         self.assertEqual(script.count("const scoreParts="), 1)
 
     def test_sales_forecast_rebases_horizon_and_separates_past_gaps(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         forecast_math = (ROOT / "templates" / "forecast-math.js").read_text(encoding="utf-8")
         self.assertIn("const rebasedForecastCompletion=", script)
         self.assertIn("const extendForecastCurve=", script)
@@ -966,7 +931,7 @@ for(const length of [1,7,35,120]){
         self.assertNotIn("confirmedReferenceSnapshot", script)
 
     def test_sales_forecast_excludes_delivery_metrics(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         module = (ROOT / "modules" / "sales_forecast.py").read_text(encoding="utf-8")
         refresh = (ROOT / "tools" / "refresh_sales_forecast_data.py").read_text(encoding="utf-8")
         for text in (script, module, refresh):
@@ -980,8 +945,8 @@ for(const length of [1,7,35,120]){
         self.assertNotIn('record.get("参考锁单率")', module)
 
     def test_sales_forecast_uses_shared_lock_parameter_and_compact_layout(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         refresh = (ROOT / "tools" / "refresh_sales_forecast_data.py").read_text(encoding="utf-8")
         parameter_block = script.split('forecast-parameter-controls', 1)[1].split('data-forecast-region="common"', 1)[0]
         self.assertNotIn('data-forecast-input="lock"', parameter_block)
@@ -993,8 +958,8 @@ for(const length of [1,7,35,120]){
         self.assertLess(script.index('forecast-progress-controls'), script.index('forecast-d1-card'))
 
     def test_forecast_short_panels_keep_natural_height_and_reference_charts_use_half_width(self):
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        css = read_template(ROOT / "templates/dashboard.css")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn(".forecast-lifecycle-grid{display:grid;grid-template-columns:minmax(300px,.72fr) minmax(0,1.55fr);gap:12px;align-items:start}", css)
         self.assertIn(".forecast-lifecycle-evidence{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,.7fr);gap:12px;align-items:start}", css)
         self.assertIn(".forecast-workspace.forecast-v2 .forecast-control-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start;min-width:0;min-height:0}", css)
@@ -1019,14 +984,14 @@ for(const length of [1,7,35,120]){
         self.assertIn(".forecast-workspace.forecast-studio .forecast-controls-rail>.forecast-scale-check{grid-column:1/-1}", css)
 
     def test_history_tables_follow_the_top_grain_without_local_selector(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn("const current=options[state.grain]?state.grain", script)
         self.assertNotIn("data-history-select", script)
         self.assertNotIn("history-toolbar", script)
 
     def test_sales_forecast_blocks_both_methods_on_raw_data_errors(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         self.assertIn('data-forecast-data-error role="alert" aria-live="assertive"', script)
         self.assertIn("rawDataError", script)
         math_script = (ROOT / "templates" / "forecast-math.js").read_text(encoding="utf-8")
@@ -1039,7 +1004,7 @@ for(const length of [1,7,35,120]){
 
 
     def test_forecast_workflow_is_discoverable_and_details_remain_available(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn('class="forecast-target-settings"', script)
         self.assertIn('class="forecast-source-details"', script)
         self.assertIn('data-forecast-stage-switch=', script)
@@ -1053,31 +1018,22 @@ for(const length of [1,7,35,120]){
         header = script.split('<section class="forecast-target">', 1)[1].split('</section>', 1)[0]
         self.assertNotIn("data-forecast-jump", header)
 
-    def test_raw_search_has_live_count_empty_state_and_mobile_picker(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        self.assertIn('id="rawMatchCount" role="status" aria-live="polite"', script)
-        self.assertIn('id="rawEmpty"', script)
-        self.assertIn('id="clearRawSearch"', script)
-        self.assertIn('id="rawFile" aria-label="选择底表文件"', script)
-        self.assertIn('$("#rawEmpty").hidden=filtered.length>1', script)
-
     def test_import_boundary_dates_follow_the_selected_stage(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn('return windows[preferred]?preferred:', script)
         self.assertIn("metric,quantity,stage:metric==='small'", script)
         self.assertIn('stageFor(row.date,target,stage)===stage', script)
         self.assertIn("status.dataset.state='error'", script)
 
     def test_navigation_discards_stale_pages_and_source_jump_preserves_back_path(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn('revision!==pageRevision||moduleId!==state.module', script)
-        self.assertIn('revision!==rawRenderRevision||state.module!=="raw"', script)
-        source_jump = script.split('async function jumpToSource(source)', 1)[1].split('function showToast', 1)[0]
-        self.assertIn('captureForecastDraft()', source_jump)
-        self.assertIn('await renderAll();syncUrl("push")', source_jump)
+        source_jump = script.split('function jumpToSource(source)', 1)[1].split('function showToast', 1)[0]
+        self.assertIn('openForecastSourceDetails(source)', source_jump)
+        self.assertNotIn('state.module=', source_jump)
 
     def test_forecast_manual_drafts_and_imports_are_saved_locally(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn("const forecastStorageKey='sales-forecast-independent-v1:'+location.pathname", script)
         self.assertIn("localStorage.setItem(forecastStorageKey", script)
         self.assertIn("localStorage.getItem(forecastStorageKey)", script)
@@ -1087,15 +1043,15 @@ for(const length of [1,7,35,120]){
         self.assertIn("本机保存失败", script)
 
     def test_import_merge_identity_includes_stage_and_explicit_replace_is_confirmed(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         self.assertIn('<option value="merge">合并（同指标同日更新）</option>', script)
         self.assertIn("mode==='replace'&&previous?.rows.length&&!window.confirm(", script)
         self.assertIn("const key=metricOf(row)+'|'+row.date", script)
         self.assertIn("source:file.name", script)
 
     def test_vehicle_parameters_stay_expanded_at_all_widths(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
+        css = read_template(ROOT / "templates/dashboard.css")
         self.assertIn('<div class="forecast-target-settings" role="group" aria-label="车型与时间参数">', script)
         self.assertNotIn('<details class="forecast-target-settings">', script)
         self.assertIn('grid-template-columns:repeat(7,minmax(0,1fr))', css)
@@ -1104,7 +1060,7 @@ for(const length of [1,7,35,120]){
 
 
     def test_forecast_source_brief_stays_outside_collapsible_details(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         header = script.split('<section class="forecast-target">', 1)[1].split('</section>', 1)[0]
         for marker in ('data-forecast-source-brief', 'data-forecast-time-brief'):
             self.assertLess(header.index(marker), header.index('<details class="forecast-source-details">'))
@@ -1114,7 +1070,7 @@ for(const length of [1,7,35,120]){
         self.assertGreaterEqual(script.count('refreshForecastHeaderBrief(root)'), 3)
 
     def test_forecast_secondary_tabs_are_lightweight_and_keyboard_visible(self):
-        css = (ROOT / "templates" / "dashboard.css").read_text(encoding="utf-8")
+        css = read_template(ROOT / "templates/dashboard.css")
         block = css.split('/* One stage entry point, followed by an aligned content-view switcher. */', 1)[1]
         primary = re.search(r'\.forecast-stage-switcher button\[aria-pressed=true\]\{([^}]+)\}', block).group(1)
         secondary = re.search(r'\.forecast-target-tabs button\[aria-selected=true\]\{([^}]+)\}', block).group(1)
@@ -1127,7 +1083,7 @@ for(const length of [1,7,35,120]){
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required for display formatter checks")
     def test_forecast_source_brief_preserves_mixed_sources_errors_and_judgement_date(self):
-        script = (ROOT / "templates" / "dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         helpers = script[script.index("  function forecastSourceBrief(text){"):
                          script.index("  function showForecastStageSummary(")]
         checks = r"""

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest import TestCase, skipUnless
 
 from openpyxl import Workbook, load_workbook
-from main import raw_tables
+from tests.legacy_order.raw_workbooks import raw_tables
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -64,9 +64,9 @@ class RawWorkbookSnapshotTests(TestCase):
 @skipUnless(shutil.which('node'), 'Node.js required')
 class RawWorkbookDownloadTests(TestCase):
     def run_download(self, invalid=False):
-        source = (ROOT / 'templates/dashboard.js').read_text(encoding='utf-8')
+        source = (ROOT / "tests/legacy_order/raw_view.js").read_text(encoding="utf-8")
         begin = source.index('  function exportRaw(')
-        end = source.index('  async function jumpToSource', begin)
+        end = len(source)
         script = r'''
 const exportsSource=JSON.parse(process.argv[1]),invalid=process.argv[2]==='true';
 const original=Buffer.from(Array.from({length:170003},(_,i)=>i%251)),downloads=[],messages=[],blobs=new Map();

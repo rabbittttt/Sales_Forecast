@@ -1,27 +1,10 @@
-// Local, offline end-to-end UX audit. Run from the repository root.
-// UI_AUDIT_FINAL=1 tests the official generated page; otherwise rebuild a preview
-// from the immutable audit baseline and current templates (same data, new UI).
+// Run against an archived order dashboard and its matching baseline.
 const fs=require('fs'),path=require('path'),assert=require('assert'),{pathToFileURL}=require('url');
-const codeRoot=path.resolve(__dirname,'../..');
-const root=path.basename(codeRoot).toLowerCase()==='scripts'?path.dirname(codeRoot):codeRoot;
-const templates=path.join(codeRoot,'generate_html/templates');
+const root=path.resolve(__dirname,'../../../..');
 const output=path.join(root,'analysis_outputs/ui_ux_audit_20260922');
-const baseline=path.join(output,'baseline.html'),preview=path.join(output,'preview.html');
-const {chromium}=require(path.join(root,'.test_runtime/node_modules/playwright'));
-function buildPreview(){
- const original=fs.readFileSync(baseline,'utf8'),data=original.match(/window.DASHBOARD_DATA_B64="([^"]+)"/)[1],
- raw=original.match(/window.DASHBOARD_RAW_B64=([\s\S]*?);<\/script>/)[1],
- logo=original.match(/class="brand-mark" src="([^"]+)"/)[1];
- let html=fs.readFileSync(path.join(templates,'dashboard.html'),'utf8');
- const values={__DASHBOARD_CSS__:fs.readFileSync(path.join(templates,'dashboard.css'),'utf8'),
- __DASHBOARD_DATA__:data,__DASHBOARD_RAW__:raw,__BRAND_LOGO__:logo,
- __DASHBOARD_JS__:['forecast-import.js','forecast-math.js','dashboard.js'].map(file=>fs.readFileSync(path.join(templates,file),'utf8')).join('\n')};
- for(const [key,value] of Object.entries(values))html=html.replace(key,()=>value);
- fs.writeFileSync(preview,html);
-}
-if(!process.env.UI_AUDIT_FINAL)buildPreview();
-if(process.argv.includes('--build-only'))process.exit(0);
-const file=process.env.UI_AUDIT_FINAL?path.join(root,'output_file/鸿蒙智行订单分析汇总.html'):preview;
+const baseline=process.env.LEGACY_ORDER_BASELINE || path.join(output,'baseline.html');
+const file=process.env.LEGACY_ORDER_HTML || path.join(root,'output_file/鸿蒙智行订单分析汇总.html');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE || path.join(root,'.test_runtime/node_modules/playwright'));
 const target='问界 M9 2026款',results={checks:[],screenshots:[],metrics:[],errors:[]};
 const check=(name,value)=>{assert(value,name);results.checks.push(name);};
 const urlFor=(file,params={})=>{const url=pathToFileURL(file);url.search=new URLSearchParams(params);return url.href;};
@@ -145,5 +128,5 @@ const numericSnapshot=page=>page.evaluate(()=>{
  await page.waitForFunction(()=>document.querySelector('[data-forecast-feedback]').dataset.state==='success');
  check('浏览器无脚本异常',results.errors.length===0);
  console.log(JSON.stringify({checks:results.checks.length,metrics:results.metrics.map(({width,firstResultTop,documentWidth})=>({width,firstResultTop,documentWidth})),errors:results.errors},null,2));
- }finally{await browser.close();fs.writeFileSync(path.join(output,process.env.UI_AUDIT_FINAL?'verification-final.json':'verification-preview.json'),JSON.stringify(results,null,2));}
+ }finally{await browser.close();fs.writeFileSync(path.join(output,'verification-final.json'),JSON.stringify(results,null,2));}
 })().catch(error=>{console.error(error);process.exitCode=1});

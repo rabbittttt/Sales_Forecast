@@ -14,7 +14,7 @@ class SmallDailyReferenceTests(unittest.TestCase):
     def js(self, body):
         setup = r'''
 const fs=require('fs'),m=require('./templates/forecast-math.js');
-const source=fs.readFileSync('templates/dashboard.js','utf8');
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const line=source.split('\n').find(line=>line.includes('const referenceDailyShape='));
 const context={factors:()=>({workday:1,weekend:2}),calendarType:(start,index)=>({type:index===1?'weekend':'workday'})};
 const shape=new Function('window','context',line+';return referenceDailyShape;')({ForecastMath:m},context);

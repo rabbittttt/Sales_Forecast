@@ -28,16 +28,41 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
       - run: python -m unittest discover -s tests
+      - name: Read reviewed portal and visual reference versions
+        id: visual
+        run: |
+          $refs = Get-Content tests/portal_visual_refs.json -Raw | ConvertFrom-Json
+          "forecast=$($refs.forecast)" >> $env:GITHUB_OUTPUT
+          "portal=$($refs.portal)" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@v4
+        with:
+          repository: rabbittttt/PlanHub
+          ref: ${{ steps.visual.outputs.portal }}
+          path: .test_runtime/planhub
+          persist-credentials: false
+          sparse-checkout: |
+            integration
+            portal
+            scripts
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.visual.outputs.forecast }}
+          path: .test_runtime/visual-baseline
+          persist-credentials: false
+          sparse-checkout: scripts/generate_html
       - name: Test embedded forecast with synthetic data
         env:
           FORECAST_TEST_PYTHON: python
           FORECAST_SCREENSHOTS: ${{ runner.temp }}/forecast-screenshots
         run: |
           $deps = Join-Path $env:RUNNER_TEMP 'forecast-browser'
-          npm install --prefix $deps --no-save --ignore-scripts --no-package-lock playwright@1.56.1
+          npm install --prefix $deps --no-save --ignore-scripts --no-package-lock playwright@1.56.1 pngjs@7.0.0
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:PLAYWRIGHT_MODULE = Join-Path $deps 'node_modules/playwright'
           node tests/forecast_page_smoke.cjs --portal-fixture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PLANHUB_TEST_ROOT = (Resolve-Path ../../.test_runtime/planhub).Path
+          node tests/portal_visual.cjs
       - name: Save synthetic header screenshots
         if: always()
         uses: actions/upload-artifact@v4

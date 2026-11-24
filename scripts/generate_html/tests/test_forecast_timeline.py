@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @unittest.skipUnless(shutil.which('node'), 'Node.js required')
 class ForecastTimelineTests(unittest.TestCase):
     def js(self, body, timezone='Asia/Shanghai'):
-        setup = "const fs=require('fs'),m=require('./templates/forecast-math.js'),source=fs.readFileSync('templates/dashboard.js','utf8');"
+        setup = "const fs=require('fs'),m=require('./templates/forecast-math.js'),source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');"
         result = subprocess.run(['node','-e',setup+body], cwd=ROOT, capture_output=True,
                                 encoding='utf-8', env={**os.environ,'TZ':timezone})
         self.assertEqual(result.returncode, 0, result.stderr)

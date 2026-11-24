@@ -1,7 +1,7 @@
 // Formal main.py output only; synthetic records stay in isolated browser memory.
-const fs=require('fs'),path=require('path'),assert=require('assert'),zlib=require('zlib'),{pathToFileURL}=require('url');
-const project=path.resolve(__dirname,'../../..'),{chromium}=require(path.join(project,'.test_runtime/node_modules/playwright'));
-const base=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
+const path=require('path'),assert=require('assert'),{pathToFileURL}=require('url');
+const project=path.resolve(__dirname,'../../..'),{chromium}=require(process.env.PLAYWRIGHT_MODULE || path.join(project,'.test_runtime/node_modules/playwright'));
+const base=pathToFileURL(process.env.FORECAST_HTML || path.join(project,'output_file/static/鸿蒙智行销量预测.html'));
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'msedge'}),errors=[],checks=[];
  try{
@@ -48,38 +48,17 @@ const base=pathToFileURL(path.join(project,'output_file/static/鸿蒙智行销�
    assert.equal(labels.some(label=>label.includes('D3')&&label.includes('200%')),today==='2026-05-05');
    checks.push('steady calendar gap and cutoff '+today);await context.close();
   }
-  const context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});
-  await context.addInitScript(()=>{
-   const text=Response.prototype.text;
-   Response.prototype.text=async function(...args){
-    const value=await text.apply(this,args);
-    if(value.includes('AUDIT_OLD'))await new Promise(resolve=>setTimeout(()=>{window.__auditOldReadFinished=true;resolve();},500));
-    return value;
-   };
-  });
-  const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(base.href);await page.waitForFunction(()=>window.DASHBOARD_DATA&&document.querySelector('#page')?.getAttribute('aria-busy')==='false');
-  const pack=marker=>zlib.gzipSync(JSON.stringify({rows:[['标记'],[marker]]})).toString('base64');
-  const indices=await page.evaluate(({old,current})=>{
-   const files=window.DASHBOARD_DATA.raw_files,index=files.length;
-   files.push(...['旧读取','当前读取'].map(name=>({name:name+'.xlsx',sheets:[{name:'by天',total_rows:2,total_cols:1}]})));
-   window.DASHBOARD_RAW_B64[index+'|0']=old;window.DASHBOARD_RAW_B64[(index+1)+'|0']=current;
-   return [index,index+1];
-  },{old:pack('AUDIT_OLD'),current:pack('AUDIT_NEW')});
-  await page.locator('[data-module="raw"]').click();await page.waitForSelector('#rawTable');
-  await page.locator(`[data-file="${indices[0]}"]`).click();
-  await page.locator(`[data-file="${indices[1]}"]`).click();
-  await page.waitForFunction(()=>document.querySelector('#rawTable')?.textContent.includes('AUDIT_NEW'));
-  await page.waitForFunction(()=>window.__auditOldReadFinished);
-  assert.equal(await page.locator('#rawFile').inputValue(),String(indices[1]));
-  assert((await page.locator('#rawTable').innerText()).includes('AUDIT_NEW'));
-  const event=page.waitForEvent('download');await page.locator('#exportRaw').click();const download=await event;
-  const csv=fs.readFileSync(await download.path(),'utf8');assert(csv.includes('AUDIT_NEW'));assert(!csv.includes('AUDIT_OLD'));
-  assert.equal(download.suggestedFilename(),'当前读取_by天.csv');
-  checks.push('late old decompression cannot alter visible sheet or exported CSV');
-  await page.locator('#rawSearch').fill('NOT_FOUND');assert(await page.locator('#rawEmpty').isVisible());
-  await page.locator('#clearRawSearch').click();assert((await page.locator('#rawTable').innerText()).includes('AUDIT_NEW'));
-  checks.push('raw search and clear still use current sheet');
+  const context=await browser.newContext();
+  const page=await context.newPage();
+  page.on('pageerror',error=>errors.push(error.message));
+  const url=new URL(base);
+  url.search=new URLSearchParams({module:'raw',rawFile:'旧工作簿.xlsx'});
+  await page.goto(url.href);
+  await page.waitForFunction(()=>window.DASHBOARD_DATA && document.querySelector('#page')?.getAttribute('aria-busy')==='false');
+  assert.equal(new URL(page.url()).searchParams.get('module'),'sales_forecast');
+  assert.equal(await page.locator('#rawTable, #exportRawWorkbook').count(),0);
+  assert(await page.evaluate(()=>window.DASHBOARD_RAW_B64===undefined && window.DASHBOARD_DATA.raw_files.length===0));
+  checks.push('legacy raw URL opens the forecast without a workbook export');
   await context.close();assert.deepEqual(errors,[]);console.log(JSON.stringify({checks,errors}));
  }finally{await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});

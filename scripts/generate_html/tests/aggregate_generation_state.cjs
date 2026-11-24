@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const script = fs.readFileSync(path.join(__dirname, '../templates/dashboard.js'), 'utf8');
+const script = require('./template_source.cjs').readTemplate(path.join(__dirname, '../templates/dashboard.js'));
 const section = (start, end) => {
   const begin = script.indexOf(start), finish = script.indexOf(end, begin);
   assert(begin >= 0 && finish > begin, `Missing source section: ${start}`);

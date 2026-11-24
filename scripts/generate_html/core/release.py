@@ -9,6 +9,8 @@ import re
 import stat
 import subprocess
 
+from core.template_assets import template_parts
+
 FILES = ("dynamic/serve.py", "requirements.txt", "scripts/generate_html/main.py",
          "scripts/generate_html/server.py", "scripts/generate_html/config.json")
 FOLDERS = ("core", "modules", "tools", "templates")
@@ -96,6 +98,8 @@ def page_revision(source: Path) -> str:
         "dashboard.html", "dashboard.css", "dashboard.js", "forecast-icon.svg",
         "forecast-import.js", "forecast-math.js",
     ))
+    for entry in ("dashboard.css", "dashboard.js"):
+        files.update(template_parts(root / "templates" / entry))
     return _files_revision(source, sorted(files))
 
 

@@ -1,3 +1,4 @@
+from core.template_assets import read_template
 import base64
 import gzip
 import json
@@ -86,7 +87,7 @@ class PayloadPackingTests(unittest.TestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("Node unavailable")
-        script = (ROOT / "templates/dashboard.js").read_text(encoding="utf-8")
+        script = read_template(ROOT / "templates/dashboard.js")
         decoder = script[script.index("  function unpackDashboard"):script.index("  const DATA =")]
         board = self.fixture()
         result = subprocess.run([node, "-e", decoder + "\nprocess.stdout.write(JSON.stringify(unpackDashboard(JSON.parse(require('fs').readFileSync(0,'utf8')))));"],
@@ -129,7 +130,7 @@ class PayloadPackingTests(unittest.TestCase):
     def test_sparse_raw_table_keeps_formats_zero_and_order(self):
         from types import SimpleNamespace
         from openpyxl import Workbook
-        from main import raw_tables
+        from tests.legacy_order.raw_workbooks import raw_tables
         book = Workbook()
         sheet = book.active
         sheet.title = "测试by天"
@@ -148,7 +149,7 @@ class PayloadPackingTests(unittest.TestCase):
         from types import SimpleNamespace
         from openpyxl import Workbook
         from core.excel import load_data_workbook
-        from main import raw_tables
+        from tests.legacy_order.raw_workbooks import raw_tables
 
         with TemporaryDirectory() as folder:
             path = Path(folder) / "鸿蒙智行大定选配比例分析.xlsx"

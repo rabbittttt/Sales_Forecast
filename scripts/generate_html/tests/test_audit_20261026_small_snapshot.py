@@ -13,7 +13,7 @@ class SmallOrderSnapshotFloorTests(unittest.TestCase):
     def run_cases(self, cases):
         script = r'''
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
-const math=require('./templates/forecast-math.js'),source=fs.readFileSync('templates/dashboard.js','utf8');
+const math=require('./templates/forecast-math.js'),source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const section=(a,b)=>{const i=source.indexOf(a),j=source.indexOf(b,i+a.length);assert(i>=0&&j>i);return source.slice(i,j)};
 const helpers=section('  function lifecycleReferenceOptions(', '  function renderSmallOrderWorkspace(')+
  section('  const observedDailyPrefix=', '  function createForecastEstimateLogger(')+

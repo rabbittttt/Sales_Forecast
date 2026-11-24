@@ -13,7 +13,7 @@ class SmallEvidenceCalendarTests(unittest.TestCase):
     def chart_values(self, observations, total=100, error=''):
         script = r'''
 const fs=require('fs'),m=require('./templates/forecast-math.js'),window={ForecastMath:m};
-const source=fs.readFileSync('templates/dashboard.js','utf8');
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const section=source.slice(source.indexOf('const renderEvidence=(target,stage,forecast)=>'),source.indexOf('function bindSteadyForecast'));
 const cut=(start,end)=>section.slice(section.indexOf(start),section.indexOf(end,section.indexOf(start)));
 const target={smallStartDate:'2026-09-01',smallDays:5};

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import gzip
-import hashlib
 import json
 import logging
 import math
@@ -13,6 +12,7 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 
 from core.discovery import aggregate_subject_aliases
+from core.template_assets import read_template
 
 
 FORECAST_PAGE_NAME = "鸿蒙智行销量预测.html"
@@ -38,7 +38,7 @@ def forecast_manifest(manifest: dict[str, Any], *, forecast_disabled: bool = Fal
                      for subject in manifest.get("subjects", [])],
         "dashboards": boards,
         "chart_assets": {},
-        # Independent forecasts deliberately omit the generic renderer's workbook exports.
+        # Keep empty metadata keys for consumers of older forecast manifests.
         "raw_files": [],
         "raw_blocks": {},
         "raw_block_urls": {},
@@ -59,27 +59,6 @@ def _write_text_atomic(output_file: Path, text: str) -> None:
         temporary.replace(output_file)
     finally:
         temporary.unlink(missing_ok=True)
-
-
-def write_raw_block_assets(raw_blocks: dict[str, str], output_file: Path) -> dict[str, str]:
-    """Immutable script blocks work from both a static HTTP host and local file URLs."""
-    urls = {}
-    for key, value in raw_blocks.items():
-        script = ("window.DASHBOARD_RAW_B64=window.DASHBOARD_RAW_B64||{};"
-                  f"window.DASHBOARD_RAW_B64[{json.dumps(key)}]={json.dumps(value)};\n")
-        content = script.encode("utf-8")
-        digest = hashlib.sha256(content).hexdigest()
-        relative = Path("forecast_assets") / f"raw-{digest}.js"
-        destination = output_file.parent / relative
-        if destination.exists():
-            # Never replace a published hash URL with different bytes: a cached
-            # old page must always resolve the exact snapshot it was built with.
-            if destination.read_bytes() != content:
-                raise ValueError(f"预测底表资源校验失败，请检查发布目录：{destination}")
-        else:
-            _write_text_atomic(destination, script)
-        urls[key] = relative.as_posix()
-    return urls
 
 
 def b64gzip(text: str) -> str:
@@ -132,14 +111,12 @@ def pack_dashboard(board: dict[str, Any]) -> dict[str, Any]:
 def render_dashboard(manifest: dict[str, Any], template_dir: Path, output_file: Path) -> None:
     started = perf_counter()
     html = (template_dir / "dashboard.html").read_text(encoding="utf-8")
-    css = (template_dir / "dashboard.css").read_text(encoding="utf-8")
+    css = read_template(template_dir / "dashboard.css")
     forecast_math = (template_dir / "forecast-math.js").read_text(encoding="utf-8")
     forecast_import = (template_dir / "forecast-import.js").read_text(encoding="utf-8")
-    javascript = f"{forecast_import}\n{forecast_math}\n{(template_dir / 'dashboard.js').read_text(encoding='utf-8')}"
+    javascript = f"{forecast_import}\n{forecast_math}\n{read_template(template_dir / 'dashboard.js')}"
     icon_data = base64.b64encode((template_dir / "forecast-icon.svg").read_bytes()).decode("ascii")
     icon_url = f"data:image/svg+xml;base64,{icon_data}"
-    # 主数据(主体/配置/底表元信息)整体压缩;看板按主体|模块分块压缩、底表行数据按表分块压缩,前端按需解压
-    raw_blocks = manifest.get("raw_blocks", {})
     dashboard_blocks, sizes = {}, {}
     pack_seconds = serialize_seconds = compress_seconds = 0.0
     for key, board in manifest.get("dashboards", {}).items():
@@ -153,31 +130,26 @@ def render_dashboard(manifest: dict[str, Any], template_dir: Path, output_file: 
         tick = perf_counter()
         dashboard_blocks[key] = b64gzip(payload)
         compress_seconds += perf_counter() - tick
-    largest_raw = max(raw_blocks.items(), key=lambda item: len(item[1]), default=("-", ""))
-    if len(largest_raw[1]) > 5 * 1024**2:
-        logging.getLogger(__name__).warning(
-            "[性能校验] 单个底表压缩块超过5MB: %s（%.1fMB），建议对该Sheet分页或虚拟滚动",
-            largest_raw[0], len(largest_raw[1]) / 1024**2,
-        )
     largest = max(sizes.items(), key=lambda item: item[1], default=("-", 0))
     logging.getLogger(__name__).info(
-        "HTML载荷: 去重后看板JSON %.1fMB，底表压缩块 %.1fMB；最大看板=%s %.1fMB",
+        "HTML载荷: 去重后看板JSON %.1fMB；最大看板=%s %.1fMB",
         sum(sizes.values()) / 1024**2,
-        sum(len(value) for value in raw_blocks.values()) / 1024**2,
         largest[0], largest[1] / 1024**2,
     )
     main_manifest = {
         key: value for key, value in manifest.items()
         if key not in ("raw_blocks", "dashboards")
     }
+    # The forecast HTML never publishes legacy workbook exports, including
+    # manifests passed directly to this renderer.
+    main_manifest.update(raw_files=[], raw_block_urls={})
     main_payload = b64gzip(json.dumps(main_manifest, ensure_ascii=False, separators=(",", ":")))
     # Escape HTML tag openers in JSON keys as well as values inside script elements.
-    raw_payload = json.dumps(raw_blocks, ensure_ascii=False, separators=(",", ":")).replace("<", r"\u003c")
     board_payload = json.dumps(dashboard_blocks, separators=(",", ":")).replace("<", r"\u003c")
     title = FORECAST_PAGE_TITLE if manifest.get("app_mode") == "forecast" else "鸿蒙智行订单分析汇总"
     replacements = {
         "__DASHBOARD_TITLE__": title, "__DASHBOARD_CSS__": css, "__DASHBOARD_DATA__": main_payload,
-        "__DASHBOARD_RAW__": raw_payload, "__DASHBOARD_BLOCKS__": board_payload,
+        "__DASHBOARD_BLOCKS__": board_payload,
         "__DASHBOARD_JS__": javascript, "__BRAND_LOGO__": icon_url, "__FAVICON__": icon_url,
     }
     html = re.sub("|".join(replacements), lambda match: replacements[match[0]], html)

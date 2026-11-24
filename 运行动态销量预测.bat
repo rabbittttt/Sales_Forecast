@@ -31,6 +31,7 @@ set "forecastPython=%workspaceDir%\.venv\Scripts\python.exe"
 if not defined forecastPython goto missing_python
 if not exist "%forecastPython%" goto missing_python
 if exist "%forecastPython%\" goto missing_python
+rem Child processes inherit this interpreter path and the matching virtual environment.
 for %%I in ("%forecastPython%") do set "launcherPythonDir=%%~dpI"
 set "PATH=%launcherPythonDir%;%PATH%"
 for %%I in ("%launcherPythonDir%..") do set "launcherEnvironment=%%~fI"

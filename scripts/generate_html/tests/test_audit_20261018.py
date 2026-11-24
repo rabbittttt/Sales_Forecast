@@ -66,7 +66,7 @@ class LaunchD1InputTests(TestCase):
 
     def test_page_honors_explicit_zero_instead_of_system_d1(self):
         result = self.run_js(r'''
-const source=require('fs').readFileSync('templates/dashboard.js','utf8');
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const declaration=source.split('\n').find(line=>line.includes('const systemD1='));
 const d1Input=m.launchD1Input?m.launchD1Input('0'):null;
 const run=new Function('get','parameterGross','d1Ratio','d1Input',declaration+';return plannedD1;');

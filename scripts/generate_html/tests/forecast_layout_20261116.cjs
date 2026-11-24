@@ -7,7 +7,7 @@ const project = path.resolve(__dirname, '../../..');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || path.join(project, '.test_runtime/node_modules/playwright'));
 const output = path.join(project, 'output_file/.test_outputs/forecast_layout_20261116');
 const html = process.env.FORECAST_HTML || path.join(project, 'output_file/static/鸿蒙智行销量预测.html');
-const script = fs.readFileSync(path.join(__dirname, '../templates/dashboard.js'), 'utf8');
+const script = require('./template_source.cjs').readTemplate(path.join(__dirname, '../templates/dashboard.js'));
 const productionFunction = name => {
   const start = script.indexOf(`  function ${name}(`);
   const end = script.indexOf('\n  function ', start + 1);

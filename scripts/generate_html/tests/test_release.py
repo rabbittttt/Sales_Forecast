@@ -74,6 +74,12 @@ class ReleaseTests(TestCase):
             css = root / "templates/dashboard.css"
             css.write_bytes(css.read_bytes() + b"\n/* header change */")
             self.assertNotEqual(page_revision(payload), before_css)
+            for name in ("forecast-navigation.css", "launch-workspace.js"):
+                with self.subTest(section=name):
+                    before = page_revision(payload)
+                    file = root / "templates" / name
+                    file.write_bytes(file.read_bytes() + b"\n/* section edit */")
+                    self.assertNotEqual(page_revision(payload), before)
 
     def test_external_output_paths_are_project_relative_and_never_shared(self):
         with TemporaryDirectory() as folder:

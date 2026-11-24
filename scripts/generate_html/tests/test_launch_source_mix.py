@@ -81,7 +81,7 @@ assert.deepEqual(shape([{item,weight:0}]),[]);
 
     def test_page_wiring_keeps_actual_and_partial_rows_outside_split(self):
         self.run_js("""
-const fs=require('fs'),source=fs.readFileSync('templates/dashboard.js','utf8');
+const fs=require('fs'),source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const code=source.slice(source.indexOf('const recomposeSources='),source.indexOf('const dailyShape=',source.indexOf('const recomposeSources=')));
 const item={days:5,launch_date:'2026-01-01',end_date:'2026-01-05',
 daily_orders:[100,100,100,100,100],daily_small:[80,70,50,30,20],daily_direct:[20,30,50,70,80]};

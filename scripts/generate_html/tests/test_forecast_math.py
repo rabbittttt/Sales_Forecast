@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.template_assets import read_template
 
 import json
 import shutil
@@ -393,7 +394,7 @@ class ForecastMathTests(unittest.TestCase):
             self.assertFalse(self.launch_daily("m.launchDailyReference(ITEM,'2026-10-11')", change)['available'])
 
     def daily_runtime(self, expression):
-        script = (ROOT / 'templates' / 'dashboard.js').read_text(encoding='utf-8')
+        script = read_template(ROOT / "templates/dashboard.js")
         declarations = [next(line.strip() for line in script.splitlines() if line.strip().startswith('const '+name+'='))
                         for name in ('adaptedDailyOrders', 'naturalDailyOrders', 'dailyUnavailable', 'rankedForTask', 'dailyShape')]
         valid = {'model':'完整参考', 'days':40, 'launch_date':'2026-09-01', 'end_date':'2026-10-10',

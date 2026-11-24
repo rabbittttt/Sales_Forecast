@@ -17,7 +17,7 @@ class SmallForecastRuntimeTests(unittest.TestCase):
     def test_end_day_links_small_prediction_even_when_launch_has_started(self):
         script = r'''
 const fs=require('fs'),assert=require('assert');
-const source=fs.readFileSync(DASHBOARD,'utf8');
+const source=require(require('path').join(require('path').dirname(DASHBOARD),'../tests/template_source.cjs')).readTemplate(DASHBOARD);
 global.window={ForecastMath:require(require('path').join(require('path').dirname(DASHBOARD),'forecast-math.js'))};
 const linkStart=source.indexOf('      const smallInput=root.querySelector');
 const linkEnd=source.indexOf('      const linkedSignature=',linkStart);
@@ -68,7 +68,7 @@ console.log(JSON.stringify({ongoing:probe('2026-09-28',1000),pending:probe('2026
         script = r'''
 const fs=require('fs');
 const {smallReferenceScore,distributeInteger,completedSmallOrderDays,anchoredAllocate}=require(MATH);
-const source=fs.readFileSync(DASHBOARD,'utf8');
+const source=require(require('path').join(require('path').dirname(DASHBOARD),'../tests/template_source.cjs')).readTemplate(DASHBOARD);
 const start=source.indexOf('  function bindSmallOrderForecast(');
 const end=source.indexOf('  function bindSteadyForecast(',start);
 const nodes=new Map(),node=key=>{if(!nodes.has(key))nodes.set(key,{value:'',textContent:'',innerHTML:'',hidden:true});return nodes.get(key)};
@@ -108,7 +108,7 @@ console.log(JSON.stringify({status,total:node('[data-small-kpi="total"]').textCo
     def test_static_page_move_migrates_only_valid_same_project_file_state(self):
         script = r"""
 const fs=require('fs'),assert=require('assert');
-const source=fs.readFileSync(DASHBOARD,'utf8');
+const source=require(require('path').join(require('path').dirname(DASHBOARD),'../tests/template_source.cjs')).readTemplate(DASHBOARD);
 const start=source.indexOf('  const forecastStages=');
 const end=source.indexOf('  loadForecastState();',start);
 assert(start>=0&&end>start,'production state loader must be found');

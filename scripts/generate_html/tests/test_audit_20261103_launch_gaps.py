@@ -13,7 +13,7 @@ class LaunchActualGapTests(TestCase):
     def run_case(self, rows, days=3, factors=None, lock_reference=None):
         script=r"""
 const fs=require('fs'),vm=require('vm'),m=require('./templates/forecast-math.js');
-const source=fs.readFileSync('templates/dashboard.js','utf8'),input=JSON.parse(process.argv[1]);
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js'),input=JSON.parse(process.argv[1]);
 const start=source.indexOf('      let knownGross='),end=source.indexOf('      root._forecastComparison=',start);
 if(start<0||end<0)throw Error('Known-actual adapter missing');
 const target={name:'target',launchDate:'2026-09-01',days:input.days};

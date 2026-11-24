@@ -13,7 +13,7 @@ class ForecastEvidenceTests(unittest.TestCase):
     def score(self, item, days, task='conversion'):
         script = r'''
 const fs=require('fs'),m=require('./templates/forecast-math.js');
-const source=fs.readFileSync('templates/dashboard.js','utf8');
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const start=source.indexOf('    const observed=window.ForecastMath.observedQuantity'),end=source.indexOf('    const scoreSummary=',start);
 if(start<0||end<=start)throw Error('Dashboard scoring block not found');
 const calculate=new Function('window','actualSignals','item','task',`

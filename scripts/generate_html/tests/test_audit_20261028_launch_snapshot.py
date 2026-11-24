@@ -13,7 +13,7 @@ class LaunchSnapshotTests(unittest.TestCase):
     def evaluate(self, cases):
         script = r'''
 const fs=require('fs'),vm=require('vm'),assert=require('assert'),math=require('./templates/forecast-math.js');
-const source=fs.readFileSync('templates/dashboard.js','utf8');
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const section=(a,b)=>{const i=source.indexOf(a),j=source.indexOf(b,i+a.length);assert(i>=0&&j>i);return source.slice(i,j)};
 const estimate=section('      const partialSmallRatio=', '      const validQuantity=');
 const build=section('      const buildRows=(scenario,availableScenario,method)=>', '      const scenarios=');

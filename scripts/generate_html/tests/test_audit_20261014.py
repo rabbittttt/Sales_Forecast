@@ -19,7 +19,7 @@ class EarlyCancellationScoreTests(unittest.TestCase):
     def score(self, days, reference=(.05, .05, .1), total=20):
         script = r'''
 const fs=require('fs'),math=require('./templates/forecast-math.js');
-const lines=fs.readFileSync('templates/dashboard.js','utf8').split('\n');
+const lines=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js').split('\n');
 const line=marker=>lines.find(text=>text.includes(marker));
 const code=[line('const closeness=(a,b'),line('const averageCloseness='),
   line('const targetD1CancelRate='),line('values.earlyCancel=d1?')].join('\n');

@@ -16,8 +16,8 @@ import main as generator
 from core.models import Dashboard, Subject
 from core.renderer import (
     FORECAST_PAGE_NAME, b64gzip, render_dashboard, forecast_manifest,
-    write_raw_block_assets,
 )
+from tests.legacy_order.raw_workbooks import write_raw_block_assets
 
 
 def embedded(output):
@@ -25,8 +25,7 @@ def embedded(output):
     bootstrap = re.search(r'window.DASHBOARD_DATA_B64="([^"]+)"', text)[1]
     manifest = json.loads(gzip.decompress(base64.b64decode(bootstrap)))
     boards = json.loads(re.search(r'window.DASHBOARD_BLOCKS_B64=(.*?);</script>', text)[1])
-    raw = json.loads(re.search(r'window.DASHBOARD_RAW_B64=(.*?);</script>', text)[1])
-    return manifest, boards, raw
+    return manifest, boards
 
 
 class StandaloneForecastTests(TestCase):
@@ -85,9 +84,9 @@ class StandaloneForecastTests(TestCase):
             tab_icon = re.search(r'<link rel="icon"[^>]+href="([^"]+)"', html)[1]
             self.assertEqual(header_icon, expected_icon)
             self.assertEqual(tab_icon, expected_icon)
-            meta, boards, raw = embedded(output)
+            meta, boards = embedded(output)
             self.assertEqual(set(boards), {"group|sales_forecast"})
-            self.assertEqual(raw, {})
+            self.assertNotIn("window.DASHBOARD_RAW_B64=", html)
             self.assertEqual(meta["raw_files"], [])
             self.assertEqual(meta["raw_block_urls"], {})
             self.assertFalse((root / "forecast_assets").exists())
@@ -104,9 +103,11 @@ class StandaloneForecastTests(TestCase):
             output = Path(directory) / FORECAST_PAGE_NAME
             render_dashboard(fixture, generator.ROOT / "templates", output)
             self.assertNotIn("</ScRiPt>", output.read_text(encoding="utf-8"))
-            _, boards, raw = embedded(output)
+            meta, boards = embedded(output)
             self.assertEqual(list(boards), [key])
-            self.assertEqual(raw, fixture["raw_blocks"])
+            self.assertNotIn("raw_blocks", meta)
+            self.assertEqual(meta["raw_files"], [])
+            self.assertNotIn("__BRAND_LOGO__", output.read_text(encoding="utf-8"))
 
     def test_resources_are_immutable_and_new_build_does_not_invalidate_old_page(self):
         with TemporaryDirectory() as directory:
@@ -163,7 +164,6 @@ class StandaloneForecastTests(TestCase):
                 stack.enter_context(patch.object(generator, "discover_subjects", return_value=subjects))
                 stack.enter_context(patch.object(generator, "forecast_target_names", return_value=[]))
                 stack.enter_context(patch.object(generator, "MODULES", modules))
-                stack.enter_context(patch.object(generator, "raw_tables", side_effect=AssertionError("forecast must not pack raw workbooks")))
                 stack.enter_context(patch.object(generator, "add_kpi_comparisons"))
                 stack.enter_context(patch.object(generator, "validate_manifest", return_value=[]))
                 shared_summary = root / "shared" / generator.SUMMARY_NAME
@@ -176,10 +176,9 @@ class StandaloneForecastTests(TestCase):
                 self.assertEqual(refresh.call_args.args[1], root)
                 self.assertEqual(modules[0].summary_path, shared_summary)
                 self.assertEqual(modules[0].build.call_count, 0 if disabled else len(subjects))
-                forecast_meta, forecast_boards, forecast_raw = embedded(output)
+                forecast_meta, forecast_boards = embedded(output)
                 self.assertEqual(forecast_meta["app_mode"], "forecast")
                 self.assertEqual(bool(forecast_boards), not disabled)
-                self.assertEqual(forecast_raw, {})
                 self.assertEqual(forecast_meta["forecast_disabled"], disabled)
                 self.assertFalse((root / "forecast_assets").exists())
                 self.assertEqual("group|sales_forecast" in manifest["dashboards"], not disabled)

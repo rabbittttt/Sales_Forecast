@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const script = fs.readFileSync(path.join(__dirname, '../templates/dashboard.js'), 'utf8');
+const script = require('./template_source.cjs').readTemplate(path.join(__dirname, '../templates/dashboard.js'));
 const start = script.indexOf('const quickBrandOrder=');
 const end = script.indexOf('function syncTopbarQuickLayout()', start);
 assert(start >= 0 && end > start, 'quick-generation selector not found');

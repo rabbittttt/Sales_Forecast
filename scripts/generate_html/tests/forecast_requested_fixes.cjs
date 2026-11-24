@@ -1,5 +1,5 @@
 const assert=require('assert'),fs=require('fs'),path=require('path');
-const script=fs.readFileSync(path.join(__dirname,'../templates/dashboard.js'),'utf8');
+const script=require('./template_source.cjs').readTemplate(path.join(__dirname,'../templates/dashboard.js'));
 const section=(start,end)=>script.slice(script.indexOf(start),script.indexOf(end,script.indexOf(start)));
 const brand=new Function(section('  const referenceBrand=','  function renderLifecycleReferenceCard(')+';return {referenceBrand,lifecycleUnavailable};')();
 assert.equal(brand.referenceBrand({model:'RX 2027款',generation:'智界 RX 2027款',brand:'界'}),'智界');
@@ -37,15 +37,18 @@ const {scoreSummary:score,scoredForTask,rankedForTask}=new Function(
   candidate=>ForecastMath.launchStage(candidate,asOf),()=>({}),()=>NaN,String,
   ()=>'',(item,task)=>item[task],historyList);
 
-const beforeShare=score(reference,'direct_share',target);
-assert.equal(Math.round(beforeShare.configuredWeight*100),48);
-assert.equal(Math.round(beforeShare.effectiveWeight*100),42);
-assert(beforeShare.parts.some(part=>part.key==='size'&&part.label.includes('小订预测')));
-assert.deepEqual(rankedForTask('direct_share',target).map(row=>row.item.model),[reference.model]);
-for(const task of ['small_progress','direct_progress']){
-  assert.deepEqual(score(reference,task,target).parts,[]);
-  assert.deepEqual(scoredForTask(task,target),[]);
-  assert.deepEqual(rankedForTask(task,target),[]);
+for (const date of ['2026-11-09', '2026-11-12']) {
+  asOf=date;
+  const beforeShare=score(reference,'direct_share',target);
+  assert.equal(Math.round(beforeShare.configuredWeight*100),48);
+  assert.equal(Math.round(beforeShare.effectiveWeight*100),42);
+  assert(beforeShare.parts.some(part=>part.key==='size'&&part.label.includes('小订预测')));
+  assert.deepEqual(rankedForTask('direct_share',target).map(row=>row.item.model),[reference.model]);
+  for(const task of ['small_progress','direct_progress']){
+    assert.deepEqual(score(reference,task,target).parts,[]);
+    assert.deepEqual(scoredForTask(task,target),[]);
+    assert.deepEqual(rankedForTask(task,target),[]);
+  }
 }
 
 const conversion=score(reference,'conversion',target);

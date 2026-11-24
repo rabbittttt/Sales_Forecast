@@ -1,4 +1,5 @@
 """Regression checks for source-date calendars and manual percentage inputs."""
+from core.template_assets import read_template
 import json
 from pathlib import Path
 import shutil
@@ -18,7 +19,7 @@ class ForecastCalendarAndRateTests(unittest.TestCase):
         return json.loads(result.stdout)
 
     def shape(self, stage, target_days, factors):
-        source = (ROOT / 'templates/dashboard.js').read_text(encoding='utf-8').splitlines()
+        source = read_template(ROOT / "templates/dashboard.js").splitlines()
         names = ['referenceDailyShape'] if stage == 'small' else ['adaptedDailyOrders', 'naturalDailyOrders', 'dailyShape']
         # Optional new declaration lets the same regression execute before the fix.
         declarations = ''.join(next((line.strip() for line in source if line.strip().startswith('const '+name+'=')), '') for name in names)
@@ -49,7 +50,7 @@ class ForecastCalendarAndRateTests(unittest.TestCase):
             self.assert_shape(self.shape(stage, 8, [1]*8), [1,1,2,1,1,1,1,1])
 
     def page_rates(self, values):
-        source = (ROOT / 'templates/dashboard.js').read_text(encoding='utf-8')
+        source = read_template(ROOT / "templates/dashboard.js")
         declaration = source.split('rate=id=>', 1)[1].split(',target=targetState()', 1)[0]
         return self.run_js('let value;const root={querySelector:()=>({value})};const rate=id=>'+declaration+';'
                            'console.log(JSON.stringify('+json.dumps(values)+'.map(raw=>{value=raw;return rate("lock")})));')
@@ -79,7 +80,7 @@ class ForecastCalendarAndRateTests(unittest.TestCase):
         self.assertEqual(result, [[],[],[],[]])
 
     def test_reference_plot_does_not_remove_calendar_twice(self):
-        source = (ROOT / 'templates/dashboard.js').read_text(encoding='utf-8').splitlines()
+        source = read_template(ROOT / "templates/dashboard.js").splitlines()
         declaration = next(line.strip() for line in source if line.strip().startswith('const references=items.map'))
         result = self.run_js("const item={model:'参考',days:8,launch_date:'2026-09-01',end_date:'2026-09-08',daily_orders:[100,100,200,100,100,100,100,100]};"
                              "const items=[item],spec={metric:'daily_orders'},task='daily',targetDays=12,card={};"

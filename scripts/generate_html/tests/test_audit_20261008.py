@@ -14,7 +14,7 @@ class OctoberEightAuditTests(unittest.TestCase):
     def js(self, body):
         setup = r'''
 const fs=require('fs'),m=require('./templates/forecast-math.js');
-const source=fs.readFileSync('templates/dashboard.js','utf8');
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const window={ForecastMath:m};
 const line=marker=>source.split('\n').find(text=>text.includes(marker));
 const component=new Function('window','slotWeight',line('const dailyComponentShare=')+';return dailyComponentShare;')(window,slot=>slot?30:70);

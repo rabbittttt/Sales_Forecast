@@ -20,14 +20,16 @@
 
 ## 预测代码定位
 
+浏览器脚本和样式按阶段与界面区域维护。生成器在 `templates/dashboard.js`、`templates/dashboard.css` 标明的位置内嵌各段，静态与动态页面共用同一套源码。
+
 | 要核对的内容 | 从这里读 |
 | --- | --- |
 | 预测模块是否运行 | `modules/registry.py` 的 `MODULES`、`modules/sales_forecast.py` 的 `SalesForecastModule` |
-| 小订、首销开始与结束边界 | Python 的 `_small_order_stage`、`_forecast_stage`；浏览器的 `smallStage`、`launchStage`；双端用例 `tests/test_forecast_contract.py` |
-| 小时快照、盘中推算、逐日分配 | `templates/forecast-math.js` 的 `smallHourlyForecast`、`intradayComponents`；`templates/dashboard.js` 按函数调用定位对应阶段 |
-| 原始 Excel、来源优先级、共享汇总 | `core/forecast_summary.py`、`tools/refresh_sales_forecast_data.py` 的 `forecast_signature` 和 `summary_is_current` |
+| 小订、首销开始与结束边界 | Python 的 `core/forecast_calendar.py`（`_small_order_stage`、`_forecast_stage`）；浏览器的 `smallStage`、`launchStage`；双端用例 `tests/test_forecast_contract.py` |
+| 小时快照、盘中推算、逐日分配 | `templates/forecast-math.js` 的 `smallHourlyForecast`、`intradayComponents`；按阶段查看 `templates/small-order-workspace.js`、`templates/launch-workspace.js`、`templates/steady-workspace.js` |
+| 原始 Excel、来源优先级、共享汇总 | 整理表表头在 `core/forecast_headers.py`，汇总在 `core/forecast_summary.py`、`tools/refresh_sales_forecast_data.py` 的 `forecast_signature` 和 `summary_is_current` |
 | 动态刷新与共享导入 | `server.py`、`core/live_server.py` 的 `LiveMonitor`、`core/external_imports.py` |
-| 顶部车型控件 | 在 `templates/dashboard.css` 检索 `#subjectSelect` 和 `#forecastNavParameters` |
+| 顶部车型控件 | `templates/forecast-navigation.js`；在 `forecast-navigation.css`、`forecast-standalone.css` 中检索 `#subjectSelect` 和 `#forecastNavParameters` |
 
 ## 模块契约
 

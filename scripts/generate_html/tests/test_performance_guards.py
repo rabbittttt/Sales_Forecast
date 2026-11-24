@@ -8,7 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, PatternFill, Protection
 from openpyxl.utils.indexed_list import IndexedList
 from tools import refresh_sales_forecast_data as refresh
@@ -81,6 +81,22 @@ class PerformanceGuardTests(unittest.TestCase):
         sheet['C2'].alignment = Alignment(wrap_text=True)
         sheet['C2'].number_format = '0.000%'
         self.assertEqual(sheet['C4']._style, preserved)
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / 'styles.xlsx'
+            book.save(output)
+            reopened = load_workbook(output)
+            try:
+                saved = reopened[sheet.title]
+                self.assertEqual(saved['C2'].number_format, '0.000%')
+                self.assertTrue(saved['C2'].alignment.wrap_text)
+                self.assertEqual(saved['C4'].number_format, '0.0%')
+                self.assertFalse(saved['C4'].alignment.wrap_text)
+                self.assertEqual(saved['A3'].fill.fgColor.rgb, 'FF123456')
+                self.assertFalse(saved['A3'].protection.locked)
+                self.assertEqual(saved['E4'].number_format, '0.000')
+                self.assertEqual(saved['E4'].fill, copy(expected['E4'].fill))
+            finally:
+                reopened.close()
         # Reusing a sheet-local cache cannot mix style indexes between workbooks.
         other = Workbook()
         other.active['A1'].fill = PatternFill('solid', fgColor='FFABCDEF')

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import logging
 import re
@@ -23,10 +22,10 @@ from core.china_calendar import PUBLISHED_YEARS
 from core.config import load_config, SUMMARY_REUSE_UNAVAILABLE
 from core.data_paths import orders_input_directory, assert_output_is_private, forecast_summary_path, assert_summary_output, project_output_directory, static_output_directory
 from core.discovery import discover_subjects, set_capabilities
-from core.excel import WorkbookStore, clean_text, format_excel_cell, reset_conflict_diagnostics
+from core.excel import WorkbookStore, reset_conflict_diagnostics
 from core.forecast_summary import SUMMARY_NAME, visible_target_names
 from core.model_identity import FORECAST_SOURCE_PATH
-from core.renderer import b64gzip, render_dashboard, forecast_manifest
+from core.renderer import render_dashboard, forecast_manifest
 from core.validation import validate_manifest
 from modules.registry import MODULES
 
@@ -239,105 +238,6 @@ def configure_runtime(output_dir: Path, debug: bool = False, log_dir: Path | Non
     LOGGER.disabled = False
     LOGGER.propagate = True
     return log_file
-
-
-def serializable(value: Any) -> Any:
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    return str(value)
-
-
-def split_parallel_blocks(name: str, rows: list[list]) -> list[dict[str, Any]]:
-    """Split side-by-side blocks (like SKU's 表格A/B/C) into separate tables."""
-    if len(rows) < 2:
-        return [{"name": name, "rows": rows}]
-    title_cols = [col for col, value in enumerate(rows[0]) if value not in (None, "")]
-    # 多区块:第一行有多个标题，且标题列之间至少隔一个空列，第二行在各标题列有表头
-    if len(title_cols) < 2:
-        return [{"name": name, "rows": rows}]
-    if any(right - left < 2 for left, right in zip(title_cols, title_cols[1:])):
-        return [{"name": name, "rows": rows}]
-    second = rows[1]
-    if not all(col < len(second) and second[col] not in (None, "") for col in title_cols):
-        return [{"name": name, "rows": rows}]
-    width = max(len(row) for row in rows)
-    blocks = []
-    for index, start in enumerate(title_cols):
-        end = title_cols[index + 1] if index + 1 < len(title_cols) else width
-        block_rows = []
-        for row in rows:
-            sliced = row[start:end]
-            while sliced and sliced[-1] in (None, ""):
-                sliced.pop()
-            block_rows.append(sliced)
-        if block_rows:
-            block_width = max(len(row) for row in block_rows)
-            keep = [col for col in range(block_width) if any(col < len(row) and row[col] not in (None, "") for row in block_rows)]
-            block_rows = [[row[col] if col < len(row) else None for col in keep] for row in block_rows]
-        blocks.append({"name": f"{name} · {rows[0][start]}", "rows": block_rows})
-    return blocks
-
-
-def raw_tables(store: WorkbookStore) -> tuple[list[dict[str, Any]], dict[str, str]]:
-    """按需加载的底表行块及原始 XLSX 快照；下载快照保留全部 Sheet 和格式。"""
-    files = []
-    blocks: dict[str, str] = {}
-    for file_index, item in enumerate(store.items):
-        sheets = []
-        for sheet in item.workbook.worksheets:
-            if getattr(sheet, "sheet_state", "visible") != "visible":
-                continue
-            rows_by_index, occupied = {}, set()
-            # Normal Workbook cells already implement merged-cell semantics.
-            # Do not materialize every blank cell in a sparse styled rectangle.
-            for cell in sheet._cells.values():
-                if cell.value is None:
-                    continue
-                value = format_excel_cell(cell)
-                if value not in (None, ""):
-                    rows_by_index.setdefault(cell.row, {})[cell.column] = value
-                    occupied.add(cell.column)
-            columns = sorted(occupied)
-            rows = []
-            for _, values in sorted(rows_by_index.items()):
-                last_column = max(values)
-                rows.append([
-                    values.get(column, None if column > last_column else "")
-                    for column in columns
-                ])
-            for block in split_parallel_blocks(sheet.title, rows):
-                block_rows = block["rows"]
-                # 首行是区块大标题（单值）、次行才是列名时，去掉冗余标题行让列名成为表头
-                if (
-                    len(block_rows) > 1
-                    and sum(1 for value in block_rows[0] if value not in (None, "")) <= 1
-                    and sum(1 for value in block_rows[1] if value not in (None, "")) > 1
-                ):
-                    block_rows = block_rows[1:]
-                key = f"{file_index}|{len(sheets)}"
-                blocks[key] = b64gzip(json.dumps({"rows": block_rows}, ensure_ascii=False, separators=(",", ":")))
-                sheets.append({
-                    "name": block["name"],
-                    "total_rows": len(block_rows),
-                    "total_cols": max((len(row) for row in block_rows), default=0),
-                    "source_sheet": sheet.title,
-                })
-        file_info = {"name": item.path.name, "sheets": sheets}
-        # Embed the original file once, not a CSV reconstruction of the split
-        # display blocks. This also works when the HTML is copied elsewhere or
-        # opened offline, and preserves formulas, merged cells and hidden tabs.
-        try:
-            workbook_bytes = item.path.read_bytes()
-        except OSError as exc:
-            LOGGER.warning("底表整表导出不可用: %s | %s", item.path.name, exc)
-        else:
-            workbook_key = f"{file_index}|xlsx"
-            blocks[workbook_key] = base64.b64encode(workbook_bytes).decode("ascii")
-            file_info["workbook_key"] = workbook_key
-        files.append(file_info)
-    return files, blocks
 
 
 def build(

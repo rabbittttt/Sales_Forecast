@@ -50,8 +50,10 @@ class CampaignCalendarTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which('node'), 'Node.js required')
 class BrowserDataWorkflowTests(unittest.TestCase):
-    def js(self, script):
-        prelude = "const fs=require('fs'),source=fs.readFileSync('templates/dashboard.js','utf8'),math=require('./templates/forecast-math.js');\n"
+    def js(self, script, *, legacy=False):
+        prelude = "const fs=require('fs'),source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js'),math=require('./templates/forecast-math.js');\n"
+        if legacy:
+            prelude = "const fs=require('fs'),source=fs.readFileSync('tests/legacy_order/raw_view.js','utf8');\n"
         result = subprocess.run(['node', '-e', prelude+script], cwd=ROOT,
                                 capture_output=True, encoding='utf-8')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -94,7 +96,7 @@ console.log(JSON.stringify(math.steadyReferenceScore({...attrs,launch_days:5,dir
         return self.js(r'''
 const begin=source.indexOf('  let rawRowsCache='),end=source.indexOf('  function filterRawRows',begin);
 const filter=source.split('\n').find(line=>line.startsWith('  function filterRawRows'));
-const exportBegin=source.indexOf('  function exportRaw('),exportEnd=source.indexOf('  async function jumpToSource',exportBegin);
+const exportBegin=source.indexOf('  function exportRaw('),exportEnd=source.length;
 const elements={},downloads=[],blobs=new Map(),pending={};
 const $=selector=>elements[selector]??=({innerHTML:'',classList:{toggle(){}},value:'',focus(){}});
 const state={module:'raw',rawFile:0,rawSheet:0,rawQuery:''};
@@ -115,7 +117,7 @@ const api=new Function('$','document','state','DATA','RAW_BLOCKS','decompressJso
  elements['#exportRaw'].onclick();
  console.log(JSON.stringify({cache:api.cache(),display:elements['#page'].innerHTML,downloads}));
 })().catch(error=>{console.error(error);process.exitCode=1});
-'''.replace('REVERSE', json.dumps(reverse)).replace('LEAVE', json.dumps(leave)))
+'''.replace('REVERSE', json.dumps(reverse)).replace('LEAVE', json.dumps(leave)), legacy=True)
 
     def test_late_old_read_cannot_change_current_sheet_export(self):
         result = self.raw_switch()
@@ -143,7 +145,7 @@ const api=new Function('fmt','esc',source.slice(begin,end)+render+';return {rawT
 const rows=Array.from({length:150000},()=>['测试车',12]);rows[rows.length-1]=['尾行',3,0];
 const count=api.rawTitleColumnCount(rows),html=api.renderRawTable(rows);
 console.log(JSON.stringify({titleColumns:count,rows:(html.match(/<tr>/g)||[]).length,lastColumn:html.includes('data-raw-col="2"')}));
-''')
+''', legacy=True)
         self.assertEqual(result, {'titleColumns': 1, 'rows': 150000, 'lastColumn': True})
 
     def test_empty_raw_table_is_still_renderable(self):
@@ -152,5 +154,5 @@ const begin=source.indexOf('  function rawCellIsData'),end=source.indexOf('  fun
 const render=source.split('\n').find(line=>line.startsWith('  function renderRawTable'));
 const api=new Function('fmt','esc',source.slice(begin,end)+render+';return {rawTitleColumnCount,renderRawTable};')(String,String);
 console.log(JSON.stringify({width:api.rawTitleColumnCount([]),html:api.renderRawTable([])}));
-''')
+''', legacy=True)
         self.assertEqual(result, {'width': 0, 'html': '<table class="data-table"><tbody></tbody></table>'})

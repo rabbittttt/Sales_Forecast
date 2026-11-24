@@ -14,7 +14,7 @@ class ForecastFactDisplayTests(unittest.TestCase):
     def run_js(self, script):
         preamble = """
 const fs=require('fs'),assert=require('assert');
-const source=fs.readFileSync('templates/dashboard.js','utf8');
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const section=(start,end)=>{const i=source.indexOf(start);assert(i>=0,start);const j=source.indexOf(end,i+start.length);assert(j>i,end);return source.slice(i,j)};
 """
         result = subprocess.run(['node', '-e', preamble + script], cwd=ROOT,

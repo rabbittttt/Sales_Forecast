@@ -1,4 +1,5 @@
 """Shared boundary inputs run against both Python and the actual JS math owner."""
+from core.template_assets import read_template
 import json
 import os
 import shutil
@@ -104,7 +105,7 @@ class ForecastContractTests(unittest.TestCase):
             self.assertFalse(self.js('m.'+method+'('+json.dumps({**args,'rawDataError':True})+').available'))
 
     def test_dashboard_no_longer_branches_on_error_prose(self):
-        script=(ROOT/'templates/dashboard.js').read_text(encoding='utf-8')
+        script=read_template(ROOT / "templates/dashboard.js")
         self.assertNotIn("startsWith('已结束日期缺少真实数据",script)
         self.assertNotIn("item==='无法按绝对日期判断首销阶段'",script)
         self.assertIn('ForecastMath.launchStage(target,todayIso())',script)

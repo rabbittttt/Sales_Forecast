@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(shutil.which('node'), 'Node.js required')
 class NavigationOrderTests(unittest.TestCase):
-    def run_js(self, body):
+    def run_js(self, body, *, forecast=False):
         script = r'''
 const fs=require('fs'),assert=require('assert');
-const source=fs.readFileSync('templates/dashboard.js','utf8');
+const source=require('./tests/template_source.cjs').readTemplate('templates/dashboard.js');
 const extract=(start,end)=>source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
 const state={subject:'A',module:'overview',grain:'week',period:null};
 const pending=[];
@@ -21,9 +21,9 @@ const getDashboard=()=>new Promise(resolve=>pending.push(resolve));
 const board=(grain,period)=>({views:{[grain]:{periods:[period],default_period:period}}});
 const ensure=new Function('DATA','state','subject','moduleAvailable','getDashboard','syncForecastStageToTarget','FORECAST_APP',
  extract('  async function ensureState()','  function renderSubjectSelect()')+';return ensureState;')(
- {},state,()=>({modules:['overview','sku','raw']}),()=>true,getDashboard,async()=>{},false);
+ {app_mode:process.argv[1],dashboard_blocks:{'A|sales_forecast':true}},state,()=>({modules:['overview','sku','sales_forecast']}),()=>true,getDashboard,async()=>{},process.argv[1]==='forecast');
 ''' + '\n(async()=>{\n' + body + '\n})().catch(e=>{console.error(e);process.exitCode=1});'
-        result = subprocess.run(['node', '-e', script], cwd=ROOT, capture_output=True, encoding='utf-8')
+        result = subprocess.run(['node', '-e', script, 'forecast' if forecast else 'legacy'], cwd=ROOT, capture_output=True, encoding='utf-8')
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
@@ -36,13 +36,14 @@ console.log(JSON.stringify(state));
 ''')
         self.assertEqual((result['subject'], result['grain'], result['period']), ('B', 'week', '26WK43'))
 
-    def test_leaving_analysis_for_raw_does_not_mutate_period(self):
+    def test_old_raw_link_reopens_forecast_and_discards_stale_period(self):
         result = self.run_js(r'''
-const old=ensure();state.module='raw';state.period='kept';await ensure();
+const old=ensure();state.module='raw';const latest=ensure();
+pending[1](board('week','26WK43'));await latest;
 pending[0](board('day','2025-05-01'));await old;
 console.log(JSON.stringify(state));
-''')
-        self.assertEqual((result['module'], result['grain'], result['period']), ('raw', 'week', 'kept'))
+''', forecast=True)
+        self.assertEqual((result['module'], result['grain'], result['period']), ('sales_forecast', 'week', '26WK43'))
 
     def test_returning_to_same_subject_discards_first_request(self):
         result = self.run_js(r'''
