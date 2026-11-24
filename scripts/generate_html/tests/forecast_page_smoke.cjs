@@ -92,6 +92,16 @@ async function checkLayout(page, frame, {singleCampaign}) {
       const tab = frame.locator('#forecastHeaderTools [data-forecast-tab="'+view+'"]');
       await tab.click();
       assert.equal(await tab.getAttribute('aria-selected'), 'true');
+      if (view === 'score') {
+        const scores = frame.locator('.forecast-score-page:visible');
+        await scores.first().waitFor();
+        for (const score of await scores.all()) {
+          assert.equal(await score.locator('.forecast-score-hero').count(), 0);
+          assert(await score.locator(':scope > :first-child').evaluate(el =>
+            el.matches('.forecast-score-summary,.forecast-score-detail')));
+          assert.equal(await score.locator('.forecast-score-methodology .forecast-score-formula').count(), 1);
+        }
+      }
     }
   }
 }
