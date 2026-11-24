@@ -6,7 +6,7 @@ from modules.sales_forecast import _history_item, _attach_small_hourly_curves
 from tools.refresh_sales_forecast_data import normalize_public_names, write_rows, SUMMARY_HEADER_ALIASES
 from tests import test_public_forecast_tables
 from tests import test_forecast_math
-from modules.overview import _rise_rankings_with_empty
+from tests.legacy_order.overview import _rise_rankings_with_empty
 
 
 class SummaryLifecycleTests(TestCase):

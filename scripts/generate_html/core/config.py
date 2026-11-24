@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import Any
 
 
+SUMMARY_REUSE_UNAVAILABLE = 3
+
+
 def strip_json_comments(text: str) -> str:
     """Remove // line comments and /* block */ comments outside of strings."""
     output: list[str] = []

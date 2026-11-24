@@ -8,7 +8,7 @@
 2. `modules/`：一个业务标签一个文件，看板口径和排布都在这里。
 3. `templates/`：页面外壳、样式和通用组件渲染。
 
-`main.py` 只编排生成流程，`config.json` 放标签顺序、显示名称和可选的销量预测复盘日期。不要直接修改 `output/` 中的生成文件。
+`main.py` 只编排生成流程，`config.json` 放标签顺序、显示名称和可选的销量预测复盘日期。修改页面时编辑模板和生成器源码。
 
 ## 常见修改
 
@@ -17,6 +17,17 @@
 - 新增一种已有组件组合：新建一个 `modules/*.py`，然后加到 `modules/registry.py` 和 `config.json`。
 - 新增一种全新图形：先在业务模块输出新 `kind`，再在 `templates/dashboard.js` 增加一个同名渲染函数。
 - 新增品牌或代际：不改代码，Sheet 名前缀符合现有命名即可。
+
+## 预测代码定位
+
+| 要核对的内容 | 从这里读 |
+| --- | --- |
+| 预测模块是否运行 | `modules/registry.py` 的 `MODULES`、`modules/sales_forecast.py` 的 `SalesForecastModule` |
+| 小订、首销开始与结束边界 | Python 的 `_small_order_stage`、`_forecast_stage`；浏览器的 `smallStage`、`launchStage`；双端用例 `tests/test_forecast_contract.py` |
+| 小时快照、盘中推算、逐日分配 | `templates/forecast-math.js` 的 `smallHourlyForecast`、`intradayComponents`；`templates/dashboard.js` 按函数调用定位对应阶段 |
+| 原始 Excel、来源优先级、共享汇总 | `core/forecast_summary.py`、`tools/refresh_sales_forecast_data.py` 的 `forecast_signature` 和 `summary_is_current` |
+| 动态刷新与共享导入 | `server.py`、`core/live_server.py` 的 `LiveMonitor`、`core/external_imports.py` |
+| 顶部车型控件 | 在 `templates/dashboard.css` 检索 `#subjectSelect` 和 `#forecastNavParameters` |
 
 ## 模块契约
 
@@ -38,14 +49,9 @@ class XxxModule:
 
 - 集团固定为“鸿蒙智行”，品牌和代际动态识别。
 - 主体类型不同，可用看板可以不同；不要强行补齐空看板。
-- 大定、锁单、小订的趋势图统一读取“图表”Sheet 中的表数据生成。
-- SKU、首销节奏、小订退订主要按单代际展示；如未来新增专门汇总 Sheet，按 Sheet 实际主体展示。
-- 输入由 `core/data_paths.py` 从本项目相对位置 `../工作台数据/shared` 解析；`SHARED_DATA_ROOT` 的相对值也以本项目为基准。共享根或文件缺失不回退旧目录。
-- 销量数据汇总默认写入并读取 `../工作台数据/shared/订单汇总/鸿蒙智行销量数据汇总.xlsx`；设置 `SHARED_DATA_ROOT` 时使用指定共享根下的同名文件。该汇总是本项目唯一允许写入的共享派生文件，禁止回退本地旧汇总。共享原始输入只读，不得覆盖其他共享文件。
-- HTML、日志和缓存默认写本项目 `output_file`。`main.py --output` 只指定 HTML 路径，日志和网页读取缓存随 HTML 输出目录保存；刷新缓存固定在本项目 `output_file/.cache/`，运行结束会同时清理两处缓存，不改变共享汇总位置，也不能写入共享目录。刷新工具显式 `--output` 可指定自定义非共享汇总文件，仍不得覆盖原始输入或其他共享文件；该选项不改变主入口读取共享汇总的约定。
+- 原始输入、共享汇总、静态输出、动态持久目录和日志遵循[项目路径表](../../README.md#输入与输出)，路径由 `core/data_paths.py` 统一解析。
 - 不添加“数据覆盖情况”、筛选区“数据口径”或自动管理建议。
 - 独立预测页在“来源与时间详情”展示数据来源和时间口径，可核对来源文件、Sheet 与可用的单元格信息。
-- SKU 的 TOP200 周度累计锁单占比、配置组合热力图保留全部历史列，首次显示时滚动到最右侧；切换组合后保留用户已拖动的位置。热力图本身负责横、竖滚动，横向滚动条始终位于卡片可见内容底部，不能放到200行之后再由外层裁切。主销 SKU 排行分列展示原表的版本中文名称、外饰、内饰和轮毂套件。
 - 销量汇总输出“首销期退订当日数量”（兼容读取旧名“退订当日数量”），保留既有D1累计基数口径；“小订期退订当日数量”按小订窗口保存真实日量并紧跟“小订当日数量”。两者均仅指小订退订，优先整理表、缺值再取小订退订分析，0与未知不能混淆。
 - 销量汇总的维护数量只接受有效非负数；空白、待更新、Excel错误、布尔值、负数或非有限值保持未知，允许有效来源按既有优先级补缺。真实0（包括数字文本0）保留原优先级；独立维护的有效比例保留，未知分母不生成完成度0。清洗只发生在生成过程的临时副本，不改原始整理表。
 - 小订分时的重复小时、非法小时或数量异常必须保留日期级质量状态；派生“小订by时”通过“分时口径状态”列传递，旧表无此列时仍校验小时和数量。异常小时不能参与D1拟合、历史分时参考或当日数量下限，独立有效日量和真实0仍保留；不能过滤坏点后把剩余小时重新当作有效完整记录。

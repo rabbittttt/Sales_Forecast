@@ -19,13 +19,14 @@ const estimate=section('      const partialSmallRatio=', '      const validQuant
 const build=section('      const buildRows=(scenario,availableScenario,method)=>', '      const scenarios=');
 function run(input){
  const day=input.day??null,hour=input.hour??null,hasSmall=input.hasSmall!==false,d1=!!input.d1;
- const partial=input.noPartial?null:hour??day;
+ const latestHourly=hour?{last_hour:12,hours:[{hour:12,gross:hour.gross}],...hour}:null;
  const fixed=d1?[]:[{index:0,date:'2026-01-01',gross:100,small_to_big:hasSmall?50:0,direct:hasSmall?50:100,lock:0}];
  const share=hasSmall?.5:0,days=input.days??3,todayIndex=d1?0:1;
  const dateAt=i=>new Date(Date.parse('2026-01-01T00:00:00Z')+i*86400000).toISOString().slice(0,10);
- const ctx={window:{ForecastMath:math},root:{},refs:{daily:[],small_progress:[],direct_progress:[]},
+ const ctx={window:{ForecastMath:math},root:{},actual:{},slotWeight:()=>1,refs:{daily:[],small_progress:[],direct_progress:[],
+   hourly:input.noCurve?[]:[{hourly_curve:Array(24).fill(input.completion??1)}]},
   target:{hasSmall,days,launchDate:'2026-01-01'},hasSmall,small:10000,
-  stageInfo:{key:'active'},todayRow:day,latestHourly:hour,partial:partial?{...partial,index:todayIndex,date:dateAt(todayIndex)}:null,
+  stageInfo:{key:'active'},todayRow:day,latestHourly:latestHourly?{...latestHourly,date:dateAt(todayIndex)}:null,noPartial:!!input.noPartial,
   todayIndex,dayIndex:todayIndex,elapsed:todayIndex,actualSmall:fixed.reduce((s,r)=>s+r.small_to_big,0),actualDirect:fixed.reduce((s,r)=>s+r.direct,0),
   partialFactor:input.completion??1,defaultSmallShare:share,baseShare:1-share,
   weighted:(a,b,c)=>c,dailyComponentShare:(a,b,c,d)=>d,resolvedFixed:fixed,
@@ -36,7 +37,10 @@ function run(input){
   d1Unavailable:!!input.noPartial,today:dateAt(todayIndex),validQuantity:v=>Number.isFinite(math.observedQuantity(v)),
   recomposeSources:()=>{}};
  vm.createContext(ctx);
- vm.runInContext(estimate+build+`;globalThis.estimate=partialEstimate;
+ const pick=section("      let partial=stageInfo.key==='active'", "      const fixed=indexedDays");
+ const hourlyCompletion=section('    const hourlyCompletion=', '    const distribute=');
+ const curveGuard=section('      const ownHourly=', '      const sum=field');
+ vm.runInContext(pick+'if(noPartial)partial=null;'+hourlyCompletion+curveGuard+estimate+build+`;globalThis.estimate=partialEstimate;
   globalThis.scenario=window.ForecastMath.launchParameterTerminal({rawDataError:false,endedComplete:false,componentsReady:true,
    hasSmall,small:hasSmall?100:0,baseConversion:1,baseShare:.5,directD1:100,d1Ratio:1,
    actualSmall,actualDirect,actualGross:actualSmall+actualDirect,anchorSmall,anchorDirect});
@@ -68,6 +72,47 @@ console.log(JSON.stringify(JSON.parse(process.argv[1]).map(run)));
         self.assertEqual(result['rows'][0]['gross'], 100)
         self.assertEqual(result['rows'][1]['gross'], 800)
         self.assertFalse(result['rows'][1]['actual'])
+
+    def test_open_day_without_timed_sales_keeps_normal_daily_forecast(self):
+        results = self.evaluate([
+            {}, {'day': {'gross': None, 'small_to_big': None, 'direct': None}},
+            {'day': {'gross': 0, 'small_to_big': 0, 'direct': 0}},
+            {'hour': {'gross': 0}, 'day': {'gross': 0}},
+        ])
+        for result in results:
+            today = result['rows'][1]
+            self.assertTrue(today['current_estimate'])
+            self.assertFalse(today.get('partial'))
+            self.assertEqual(today['gross'], results[0]['rows'][1]['gross'])
+            self.assertGreater(today['gross'], 0)
+            self.assertEqual(result['scenario']['gross'], 200)
+
+    def test_open_day_estimate_uses_only_hourly_volume_for_extrapolation(self):
+        timed, untimed = self.evaluate([
+            {'hour': {'gross': 60, 'small_to_big': 30, 'direct': 30}, 'completion': .5},
+            {'day': {'gross': 150, 'direct': 75, 'small_to_big': 75}, 'completion': .5},
+        ])
+        self.assertEqual(timed['rows'][1]['gross'], 120)
+        self.assertTrue(timed['rows'][1]['partial'])
+        self.assertEqual(untimed['rows'][1]['gross'], 150)
+        self.assertTrue(untimed['rows'][1]['current_estimate'])
+        self.assertEqual(untimed['scenario']['gross'], 250)
+
+    def test_open_day_with_timed_sales_but_no_curve_uses_daily_plan_and_floor(self):
+        base, missing, raised = self.evaluate([
+            {'noCurve': True},
+            {'hour': {'gross': 10}, 'noCurve': True},
+            {'hour': {'gross': 150}, 'noCurve': True},
+        ])
+        today = missing['rows'][1]
+        self.assertEqual(today['gross'], base['rows'][1]['gross'])
+        self.assertGreater(today['gross'], 10)
+        self.assertTrue(today['current_estimate'])
+        self.assertFalse(today.get('partial'))
+        self.assertEqual(raised['rows'][1]['gross'], 150)
+        self.assertTrue(raised['rows'][1]['current_estimate'])
+        for field in ('date', 'gross', 'small_to_big', 'direct', 'lock', 'actual'):
+            self.assertEqual(raised['rows'][0][field], base['rows'][0][field])
 
     def test_overlapping_snapshots_are_not_summed_or_extrapolated_twice(self):
         results = self.evaluate([{'hour': {'gross': 200, 'small_to_big': 100, 'direct': 100},
@@ -111,6 +156,30 @@ console.log(JSON.stringify(JSON.parse(process.argv[1]).map(run)));
         self.assert_conserved(result, 800, 400, 400)
         self.assertEqual(result['rows'][0]['gross'], 800)
         self.assertFalse(result['rows'][0]['actual'])
+
+    def test_intraday_estimate_sets_final_day_total_and_respects_current_hour(self):
+        last = self.evaluate([{'days': 2, 'hour': {'gross': 10}, 'completion': .5}])[0]
+        self.assertEqual(last['rows'][1]['gross'], 20)
+        self.assertEqual(last['scenario']['gross'], 120)
+
+        script = r"""
+const m=require('./templates/forecast-math.js'),assert=require('node:assert/strict');
+const bucket={date:'2026-11-24',last_hour:23,orders:40,hours:[{hour:10,orders:40},{hour:23,orders:0}]};
+const result=m.asOfHourlyBucket(bucket,'orders','2026-11-24T10:55:00');
+assert.equal(result.last_hour,10);
+assert.equal(bucket.last_hour,23);
+assert(m.usableHourlySnapshot(result,'orders'));
+assert(!m.usableHourlySnapshot({...result,orders:0},'orders'));
+const history=m.intradayReference({buckets:[{date:'2026-11-23',hours:[{hour:10,orders:50},{hour:18,orders:50}]}],
+  days:[{date:'2026-11-23',orders:100}],launchDate:'2026-11-20',today:'2026-11-24',metric:'orders'});
+assert.equal(history.curve[10],.5);
+assert.deepEqual(m.allocateIntraday([120,80],40,result.orders/history.curve[10]),[80,120]);
+assert.deepEqual(m.allocateIntraday([120],40,80),[80]);
+assert.deepEqual(m.allocateIntraday([120,80],0,null),[120,80]);
+assert.deepEqual(m.allocateIntraday([120,80],170,80),[170,30]);
+"""
+        run = subprocess.run(['node', '-e', script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
 
     def test_final_launch_day_and_no_reservation_preserve_total(self):
         results = self.evaluate([{'days': 2, 'hour': {'gross': 200}, 'day': {'gross': 800}},

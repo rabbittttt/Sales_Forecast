@@ -12,14 +12,14 @@ from core.components import add_kpi_comparisons
 from core.discovery import discover_subjects, is_valid_subject_name, set_capabilities
 from core.excel import WorkbookItem, WorkbookStore, compact_identifier, compact_text, format_excel_value, grain_from_sheet, parse_metric_sheet, safe_number, sheet_subject, subject_parent, subject_type
 from core.models import Subject
-from modules.generic import GenericModule
-from modules.launch_rhythm import LaunchRhythmModule
-from modules.option_fee import OptionFeeModule, _option_layout, _period_groups, _version_rows_by_period
-from modules.order_mix import LockMixModule, OrderMixModule, SmallOrderMixModule
-from modules.cancellation import CancellationModule, parse_select_retreat
-from modules.conversion import ConversionModule
-from modules.overview import OverviewModule, _drop_rankings, _group_model_series, _lock_share_rows, _log_lock_share_issues, _period_range_text, _rise_rankings
-from modules.sku import SkuModule, find_header_row
+from tests.legacy_order.generic import GenericModule
+from tests.legacy_order.launch_rhythm import LaunchRhythmModule
+from tests.legacy_order.option_fee import OptionFeeModule, _option_layout, _period_groups, _version_rows_by_period
+from tests.legacy_order.order_mix import LockMixModule, OrderMixModule, SmallOrderMixModule
+from tests.legacy_order.cancellation import CancellationModule, parse_select_retreat
+from tests.legacy_order.conversion import ConversionModule
+from tests.legacy_order.overview import OverviewModule, _drop_rankings, _group_model_series, _lock_share_rows, _log_lock_share_issues, _period_range_text, _rise_rankings
+from tests.legacy_order.sku import SkuModule, find_header_row
 from tools.refresh_sales_forecast_data import build_mapping_workbook, write_rows
 
 
@@ -473,7 +473,7 @@ class SubjectParsingTests(unittest.TestCase):
         )
         subject = Subject("generation_test", "问界 M9 2026款", "generation", "问界")
         issues = [("version", period, ()) for period in periods]
-        with self.assertLogs("modules.overview", level="WARNING") as captured:
+        with self.assertLogs("tests.legacy_order.overview", level="WARNING") as captured:
             _log_lock_share_issues(subject, "week", periods, issues)
         self.assertEqual(len(captured.output), 1)
         self.assertIn("缺少同期版本结构=26WK01–26WK04（4期）", captured.output[0])
@@ -510,7 +510,7 @@ class SubjectParsingTests(unittest.TestCase):
             WorkbookItem(Path("鸿蒙智行锁单选配比例分析.xlsx"), lock_book),
         ]
 
-        with self.assertNoLogs("modules.overview", level="WARNING"):
+        with self.assertNoLogs("tests.legacy_order.overview", level="WARNING"):
             dashboard = OverviewModule().build(store, Subject("brand_test", "问界", "brand", "鸿蒙智行"))
 
         pages = dashboard.views["day"]["pages"]
@@ -846,7 +846,7 @@ class SubjectParsingTests(unittest.TestCase):
             WorkbookItem(Path("区域销售分析.xlsx"), unmatched_book),
         ]
         subject = Subject("generation_test", "问界 M6 2026款", "generation", "问界")
-        with self.assertLogs("modules.generic", level="WARNING") as captured:
+        with self.assertLogs("tests.legacy_order.generic", level="WARNING") as captured:
             dashboard = GenericModule().build(store, subject)
         page = dashboard.views["week"]["pages"]["汇总"]
         self.assertEqual(page["sections"][0]["title"], "待归类数据")

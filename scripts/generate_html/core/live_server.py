@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -16,7 +16,7 @@ from typing import Callable
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from core.external_imports import ImportConflict, ImportStore, valid_text
-from core.config import load_config
+from core.config import SUMMARY_REUSE_UNAVAILABLE, load_config
 from core.data_paths import (
     FORECAST_SUMMARY_NAME, PROJECT_ROOT, forecast_reference_directory,
     model_information_directory,
@@ -26,7 +26,6 @@ from core.renderer import FORECAST_PAGE_NAME, _write_text_atomic
 
 LOGGER = logging.getLogger(__name__)
 CLIENT_PATH = Path(__file__).resolve().parents[1] / "templates" / "forecast-live.js"
-SUMMARY_REUSE_UNAVAILABLE = 3
 
 
 @dataclass(frozen=True)
@@ -50,8 +49,10 @@ def scan_inputs(input_dir: Path, project_root: Path = PROJECT_ROOT) -> InputSnap
                 paths.add(path.resolve())
     config_path = Path(project_root) / "scripts" / "generate_html" / "config.json"
     config = load_config(config_path)
-    paths.add(config_path.resolve())
-    facts = []
+    # The release directory/mtime can change on deployment with identical config.
+    # The parsed settings are also the values used for the business-day decision.
+    settings = json.dumps(config, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    facts = [("config.json", len(settings), int.from_bytes(hashlib.sha256(settings).digest(), "big"))]
     for path in sorted(paths):
         stat = path.stat()
         facts.append((str(path), stat.st_size, stat.st_mtime_ns))
@@ -93,11 +94,33 @@ def previous_published_page(live_dir: Path) -> bytes | None:
     return None
 
 
+def _input_changes(old: InputSnapshot, new: InputSnapshot) -> tuple[str, bool]:
+    """Return a public change description and whether only config changed."""
+    before = {name: (size, stamp) for name, size, stamp in old.files}
+    after = {name: (size, stamp) for name, size, stamp in new.files}
+    changed = {name for name in before.keys() | after.keys() if before.get(name) != after.get(name)}
+    reasons = []
+    if old.day != new.day:
+        reasons.append(f"业务日期由 {old.day} 变为 {new.day}")
+    if any(Path(name).name == "config.json" for name in changed):
+        reasons.append("预测配置变化")
+    workbooks = [Path(name).stem for name in changed if Path(name).suffix.lower() == ".xlsx"]
+    if workbooks:
+        categories = ("首销期订单节奏", "小订退订分析", "小订选配比例", "锁单选配比例", "大定选配比例",
+                      "销量数据整理", "小订及首销数据整理", "车型基本信息")
+        public_types = [kind for kind in categories if any(kind in name for name in workbooks)]
+        details = "（" + "、".join(public_types) + "）" if public_types else ""
+        reasons.append(f"{len(workbooks)} 份输入工作簿变化{details}")
+    config_only = bool(changed) and old.day == new.day and all(Path(name).name == "config.json" for name in changed)
+    return "；".join(reasons), config_only
+
+
 class LiveMonitor:
     def __init__(self, scan: Callable[[], InputSnapshot], build: Callable[[], bytes],
                  clock=time.monotonic, scan_interval=300, stable_seconds=60,
                  output_file: Path | None = None, cache_files: tuple[Path, ...] = (), *,
-                 build_from_current_summary: Callable[[], bytes | None] | None = None):
+                 build_from_current_summary: Callable[[], bytes | None] | None = None,
+                 service_version: str = "", page_version: str = ""):
         self.scan = scan
         self.build = build
         self.clock = clock
@@ -106,6 +129,12 @@ class LiveMonitor:
         self.output_file = output_file
         self.cache_files = cache_files
         self._build_from_current_summary = build_from_current_summary
+        self._startup_summary_checked = False
+        self._last_snapshot = None
+        self._service_version = service_version
+        self._page_version = page_version
+        self._refresh_reason = "首次生成当前版本页面"
+        self._last_success_at = ""
         self._restored = None
         self._lock = threading.Lock()
         self._tick_lock = threading.Lock()
@@ -119,11 +148,16 @@ class LiveMonitor:
         self._stable_since = 0.0
         self._next_scan = 0.0
 
-    def seed(self, content: bytes, *, previous: bool = False) -> None:
+    def seed(self, content: bytes, *, previous: bool = False, reason: str = "", published_at: str = "") -> None:
         with self._lock:
             self._content = content
             self._revision = hashlib.sha256(content).hexdigest()
             self._previous_result = previous
+            if reason:
+                self._refresh_reason = reason
+            if published_at:
+                self._state, self._error = "ready", ""
+                self._last_success_at = published_at
 
     @property
     def checkpoint_file(self) -> Path | None:
@@ -149,25 +183,32 @@ class LiveMonitor:
             content = self.output_file.read_bytes()
             if not content:
                 return False
-            self.seed(content, previous=True)
+            self.seed(content, previous=True, reason="核验上次生成的页面")
             saved = json.loads(self.checkpoint_file.read_text(encoding="utf-8"))
             if saved.get("schema_version") != 1 or saved.get("revision") != self.page()[1]:
                 return False
             source = saved["snapshot"]
             snapshot = InputSnapshot(source["day"], tuple(tuple(row) for row in source["files"]))
+            if not isinstance(snapshot.day, str) or not all(
+                len(row) == 3 and isinstance(row[0], str) and isinstance(row[1], int) and isinstance(row[2], int)
+                for row in snapshot.files
+            ):
+                return False
             self._restored = (snapshot, saved["artifacts"])
+            self._last_snapshot = snapshot
+            self._last_success_at = saved.get("last_success_at", "")
             return True
         except (OSError, ValueError, TypeError, KeyError, AttributeError):
             # Missing checkpoints from older runs do not hide a usable same-version page.
             return False
 
-    def _save_checkpoint(self, snapshot: InputSnapshot, content: bytes) -> None:
+    def _save_checkpoint(self, snapshot: InputSnapshot, content: bytes, published_at: str) -> None:
         if self.checkpoint_file is None:
             return
         try:
             saved = {"schema_version": 1, "snapshot": asdict(snapshot),
                      "revision": hashlib.sha256(content).hexdigest(),
-                     "artifacts": self._cache_artifacts()}
+                     "artifacts": self._cache_artifacts(), "last_success_at": published_at}
             _write_text_atomic(self.checkpoint_file, json.dumps(saved, ensure_ascii=False))
         except (OSError, ValueError, TypeError):
             # This optional optimization must not fail an already published report.
@@ -181,13 +222,16 @@ class LiveMonitor:
         with self._lock:
             return {"app": "sales-forecast-live", "state": self._state,
                     "revision": self._revision, "error": self._error,
-                    "previous_result": self._previous_result}
+                    "previous_result": self._previous_result,
+                    "service_version": self._service_version, "page_version": self._page_version,
+                    "refresh_reason": self._refresh_reason, "last_success_at": self._last_success_at}
 
-    def _set_state(self, state: str, error: str = "") -> None:
+    def _set_state(self, state: str, error: str = "", *, reason: str = "") -> None:
         with self._lock:
             self._state, self._error = state, error
-            if state == "ready":
-                self._previous_result = False
+            if reason:
+                self._refresh_reason = reason
+            self._previous_result = state != "ready" and self._content is not None
 
     def tick(self) -> None:
         if not self._tick_lock.acquire(blocking=False):
@@ -208,38 +252,45 @@ class LiveMonitor:
             return
         current = self.scan()
         self._next_scan = now + self.scan_interval
+        reason, config_only = _input_changes(self._last_snapshot, current) if self._last_snapshot is not None else ("", False)
         if self._restored is not None:
             snapshot, artifacts = self._restored
             self._restored = None
             try:
                 if current == snapshot and artifacts == self._cache_artifacts():
                     self._applied = current
+                    reason = "输入、业务日期与汇总均未变化，复用上次页面"
                     LOGGER.info("输入、业务日期及汇总未变化，已恢复上次预测，无需等待或重新生成")
+                elif current == snapshot:
+                    reason = "共享销量汇总已变化"
             except OSError:
+                reason = "共享销量汇总暂不可用"
                 LOGGER.info("快速启动依赖不可用，按稳定检查流程重新生成")
         if current == self._applied:
             self._pending = None
-            self._set_state("ready")
+            self._set_state("ready", reason=reason)
             return
         content = None
-        if self._applied is None and self._build_from_current_summary is not None:
-            build_from_summary = self._build_from_current_summary
-            self._build_from_current_summary = None
-            self._set_state("building")
+        if self._applied is None and self._build_from_current_summary is not None and not self._startup_summary_checked:
+            self._startup_summary_checked = True
+            self._set_state("building", reason=reason)
             LOGGER.info("检查现有销量汇总，尝试生成当前版本页面")
-            content = build_from_summary()
+            content = self._build_from_current_summary()
         if content is None:
             if current != self._pending:
                 self._pending = current
                 self._stable_since = now
-                self._set_state("waiting")
+                self._set_state("waiting", reason=reason)
                 LOGGER.info("需要从原始输入更新预测，等待连续 %s 秒稳定", self.stable_seconds)
                 return
             if now - self._stable_since < self.stable_seconds:
                 return
             self._set_state("building")
             LOGGER.info("输入已稳定，开始更新预测")
-            content = self.build()
+            if config_only and self._applied is not None and self._build_from_current_summary:
+                content = self._build_from_current_summary()
+            if content is None:
+                content = self.build()
         if not content:
             raise ValueError("生成器未返回有效 HTML")
         after = self.scan()
@@ -247,17 +298,17 @@ class LiveMonitor:
         if after != current:
             self._pending = after
             self._stable_since = finished
-            self._set_state("waiting")
+            self._set_state("waiting", reason="生成期间：" + _input_changes(current, after)[0])
             LOGGER.info("生成期间输入再次变化，等待稳定后重新生成")
             return
+        published_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
         if self.output_file is not None:
             _write_text_atomic(self.output_file, content.decode("utf-8"))
-            self._save_checkpoint(current, content)
-        self.seed(content)
-        self._applied = current
+            self._save_checkpoint(current, content, published_at)
+        self.seed(content, published_at=published_at)
+        self._applied = self._last_snapshot = current
         self._pending = None
         self._next_scan = finished + self.scan_interval
-        self._set_state("ready")
         LOGGER.info("动态预测已更新")
 
     def run(self, stop: threading.Event) -> None:
@@ -365,7 +416,10 @@ class ForecastHandler(BaseHTTPRequestHandler):
         elif path == "/api/imports" and self.server.imports:
             self._import_api(head)
         elif path == "/api/status":
-            data = json.dumps({**self.server.monitor.status(), "instance": self.server.instance_id},
+            status = self.server.monitor.status()
+            if status["error"]:
+                status["error"] = "后台读取或生成失败，详情见服务日志"
+            data = json.dumps({**status, "instance": self.server.instance_id},
                               ensure_ascii=False).encode("utf-8")
             self._send(data, "application/json; charset=utf-8", head=head)
         elif path == "/__forecast_live.js":

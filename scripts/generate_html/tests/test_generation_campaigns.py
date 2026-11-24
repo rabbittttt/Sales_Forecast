@@ -13,8 +13,8 @@ from core.model_identity import stage_records, stage_name, parent_generation, re
 from core.models import Subject
 from core.models import Dashboard, SourceRef
 from core.components import kpi
-from modules.cancellation import CancellationModule
-from modules.launch_rhythm import LaunchRhythmModule
+from tests.legacy_order.cancellation import CancellationModule
+from tests.legacy_order.launch_rhythm import LaunchRhythmModule
 from modules.sales_forecast import _combined_steady_inputs, _read_stage_windows, _read_model_mapping_file, _progress_rows, _small_campaign_rows, _read_model_master, _read_model_mapping, _primary_attributes
 from tools.refresh_sales_forecast_data import load_mapping, normalize_public_names, write_rows, append_forecast_inputs, DEFAULT_SOURCE, DEFAULT_MAPPING
 
@@ -39,7 +39,7 @@ class GenerationCampaignTests(TestCase):
                             kpi('退订', orders-retained), kpi('留存率', retained/orders*100)],
                     'sections': []}
             return Dashboard('cancellation', 'm7', {'day': {'pages': {'日期':page}}}, [source])
-        with patch('modules.cancellation.generation_records', return_value=rs), \
+        with patch('tests.legacy_order.cancellation.generation_records', return_value=rs), \
              patch.object(CancellationModule, '_build_campaign', side_effect=[board(100,90),board(300,150)]):
             result = CancellationModule().build(None, Subject('m7', PARENT, 'generation'))
         view = result.views['day']
@@ -49,7 +49,7 @@ class GenerationCampaignTests(TestCase):
         values = [c['value'] for c in view['pages']['全部阶段']['kpis']]
         self.assertEqual(values, [400,240,160,60])
         self.assertEqual(len(result.sources), 1)
-        with patch('modules.cancellation.generation_records', return_value=rs[:1]), \
+        with patch('tests.legacy_order.cancellation.generation_records', return_value=rs[:1]), \
              patch.object(CancellationModule, '_build_campaign', return_value=board(100,90)):
             single = CancellationModule().build(None, Subject('m7', PARENT, 'generation'))
         self.assertNotIn('全部阶段', single.views['day']['periods'])
@@ -82,7 +82,7 @@ class GenerationCampaignTests(TestCase):
             sheet.append([date(2024,month,1),quantity,quantity,0,0,quantity/1000,0])
         store = WorkbookStore(Path('.'))
         store.items = [WorkbookItem(Path('小订选配比例分析.xlsx'),mix),WorkbookItem(Path('小订退订分析.xlsx'),cancel)]
-        with patch('modules.cancellation.generation_records',return_value=records()), \
+        with patch('tests.legacy_order.cancellation.generation_records',return_value=records()), \
              patch('core.model_identity.generation_records',return_value=records()):
             board = CancellationModule().build(store,Subject('m7',PARENT,'generation'))
         self.assertIsNotNone(board)

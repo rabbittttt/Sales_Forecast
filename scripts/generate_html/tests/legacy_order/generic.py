@@ -44,7 +44,7 @@ class GenericModule:
 
     def __init__(self) -> None:
         self._dashboards: dict = {}
-        config = load_config(Path(__file__).resolve().parents[1] / "config.json")
+        config = load_config(Path(__file__).resolve().parents[2] / "config.json")
         self._labels: dict[str, str] = config.get("module_labels", {})
         self._chart_render_mode = config.get("chart_render_mode", "generated")
 

@@ -4597,7 +4597,7 @@ body.forecast-app .topbar .filters,
 body.forecast-app .topbar .filters[data-mode=window] {display:flex;flex-wrap:wrap;gap:8px;min-width:0;width:auto}
 body.forecast-app .topbar .filters label:first-child {width:250px;min-width:180px;max-width:100%;flex:0 1 250px}
 body.forecast-app .topbar .filters .period-field {width:210px;min-width:0;flex:0 1 210px}
-body.forecast-app .topbar .filters select {height:38px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:8px;background:var(--page);color:var(--ink);font-size:13px}
+body.forecast-app .topbar .filters #periodSelect {height:38px;padding:7px 10px}
 body.forecast-app .topbar .filters span {color:var(--muted)}
 body.forecast-app .topbar .top-actions #updatedAt {padding:0;border:0;background:none;color:var(--muted);font-size:var(--type-note);white-space:normal}
 body.forecast-app .topbar .filter-group,
@@ -4818,11 +4818,6 @@ button,select,input {font-family:inherit}
 .panel-source {border-color:var(--line);border-radius:999px;background:var(--card);color:var(--primary-strong)}
 .panel-source:hover {border-color:var(--line-strong);background:var(--primary-soft)}
 body.forecast-app .topbar .brand-mark {border-radius:10px;box-shadow:none}
-body.forecast-app .topbar .filters select {
-  border-color:var(--line);
-  border-radius:999px;
-  background:var(--surface-muted);
-}
 body.forecast-app .module-bar .module-nav button {
   position:relative;
   gap:8px;
@@ -5009,7 +5004,7 @@ body.forecast-app .workspace:has(#page) { padding-top: var(--dashboard-gap); }
   body.forecast-app .topbar .filters[data-mode=window] { flex: none; flex-wrap: nowrap; width: max-content; }
   body.forecast-app .topbar .filters label:first-child,
   body.forecast-app .topbar .filters .period-field { flex: none; width: auto; max-width: 55vw; }
-  body.forecast-app .topbar .filters select { height: 32px; padding-block: 0; }
+  body.forecast-app .topbar .filters #periodSelect { height: 32px; padding-block: 0; }
   body.forecast-app .module-bar .module-nav button { padding-inline: 12px; }
 }
 
@@ -5070,6 +5065,7 @@ body.forecast-app #forecastNavParameters label {
 }
 body.forecast-app .topbar #subjectSelect,
 body.forecast-app #forecastNavParameters :is(input, select) {
+  height: 38px;
   min-height: 38px;
   padding: 4px 6px;
   border-color: var(--line);

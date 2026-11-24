@@ -1,6 +1,7 @@
 """Forecast-owned immutable runtime inventory and release envelope."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -43,12 +44,59 @@ def runtime_files(source: Path) -> list[Path]:
     return sorted(files)
 
 
-def runtime_revision(source: Path) -> str:
+def _files_revision(source: Path, paths: list[Path]) -> str:
     digest = hashlib.sha256()
-    for path in runtime_files(source):
+    for path in sorted(paths):
         digest.update(path.relative_to(source).as_posix().encode("utf-8") + b"\0")
         digest.update(hashlib.sha256(path.read_bytes()).digest())
     return digest.hexdigest()
+
+
+def runtime_revision(source: Path) -> str:
+    return _files_revision(source, runtime_files(source))
+
+
+def page_revision(source: Path) -> str:
+    """Inputs that produce the cached HTML. Service-only assets stay in the release hash."""
+    root = source / "scripts/generate_html"
+    # The registry imports the active business modules. Follow their local imports
+    # as well, so adding a helper to a registered module invalidates the page.
+    local_modules = {}
+    for folder in ("core", "modules", "tools"):
+        for file in (root / folder).rglob("*.py"):
+            parts = file.relative_to(root).with_suffix("").parts
+            name = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+            local_modules[name] = file
+    pending = [root / "main.py", root / "tools/refresh_sales_forecast_data.py"]
+    files = {source / "requirements.txt"}
+    while pending:
+        path = pending.pop()
+        if path in files:
+            continue
+        files.add(path)
+        for node in ast.walk(ast.parse(path.read_bytes(), filename=str(path))):
+            if isinstance(node, ast.Import):
+                names = [item.name for item in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                if node.level:
+                    parents = list(path.relative_to(root).parts[:-node.level])
+                    base = ".".join([*parents, base] if base else parents)
+                names = [base, *(f"{base}.{item.name}" for item in node.names)]
+            else:
+                continue
+            for name in names:
+                parts = name.split(".")
+                for i in range(1, len(parts) + 1):
+                    dependency = local_modules.get(".".join(parts[:i]))
+                    if dependency and dependency not in files:
+                        pending.append(dependency)
+    # These are the embedded resources in core.renderer.render_dashboard.
+    files.update(root / "templates" / name for name in (
+        "dashboard.html", "dashboard.css", "dashboard.js", "forecast-icon.svg",
+        "forecast-import.js", "forecast-math.js",
+    ))
+    return _files_revision(source, sorted(files))
 
 
 def build_release(source: Path, destination: Path, version: str) -> dict:

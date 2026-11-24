@@ -81,7 +81,7 @@ console.log(JSON.stringify(JSON.parse(process.argv[1]).map(run)));
     def test_last_day_terminal_recalculation_keeps_known_lock_floor(self):
         result = self.run_cases([{'days': 2}])[0]
         self.assertEqual(result['lock'], 100)
-        self.assertEqual(result['rowGross'], 300)
+        self.assertEqual(result['rowGross'], 200)  # 100 closed + 100 projected from today's hourly snapshot
 
     def test_d1_snapshot_raising_gross_keeps_known_lock_floor(self):
         result = self.run_cases([{'fixed': [], 'todayIndex': 0, 'noPartial': True,

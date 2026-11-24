@@ -10,9 +10,9 @@ from openpyxl.utils.datetime import to_excel
 
 from core.excel import WorkbookItem, WorkbookStore, _week_period, _source_date_range, display_period, parse_metric_sheet
 from core.forecast_summary import INDEX_SHEET, summary_scope
-from modules.conversion import ConversionModule, STAGES
+from tests.legacy_order.conversion import ConversionModule, STAGES
 from modules.sales_forecast import _read_steady_history
-from modules.overview import OverviewModule
+from tests.legacy_order.overview import OverviewModule
 from core.models import Subject
 
 

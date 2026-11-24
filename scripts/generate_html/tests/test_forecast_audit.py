@@ -21,6 +21,17 @@ class ForecastAuditTests(unittest.TestCase):
         empty = _fill_sparse_dates([], ('orders',), coverage, date(2026, 9, 2), date(2026, 9, 4))
         self.assertEqual([row['orders'] for row in empty], [0, 0, 0])
 
+    def test_only_closed_dates_can_be_filled_and_today_keeps_reported_values(self):
+        today = date(2026, 11, 24)
+        coverage = [(date(2026, 11, 23), date(2026, 11, 25))]
+        for current in ([], [{"date": today.isoformat(), "orders": 0}],
+                        [{"date": today.isoformat(), "orders": 23}]):
+            with self.subTest(current=current):
+                rows = _fill_sparse_dates(current, ("orders",), coverage, before=today)
+                self.assertEqual(rows, [{"date": "2026-11-23", "orders": 0, "absent_as_zero": True}, *current])
+        self.assertEqual(_fill_sparse_dates([], ("orders",), [(date.min, date.min)], before=date.min), [])
+        self.assertEqual(_fill_sparse_dates([], ("orders",), [(date.max, date.max)])[0]["date"], "9999-12-31")
+
     def test_separate_export_intervals_never_fill_uncovered_gap(self):
         coverage = [(date(2026, 9, 1), date(2026, 9, 2)), (date(2026, 9, 5), date(2026, 9, 6))]
         result = _fill_sparse_dates([], ('lock',), coverage)

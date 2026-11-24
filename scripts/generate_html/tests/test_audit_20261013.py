@@ -8,7 +8,7 @@ from datetime import date
 from openpyxl import Workbook
 
 from core.excel import WorkbookItem, WorkbookStore
-from modules.overview import _drop_rankings, _rise_rankings_with_empty, _group_model_series
+from tests.legacy_order.overview import _drop_rankings, _rise_rankings_with_empty, _group_model_series
 
 ROOT = Path(__file__).resolve().parents[1]
 

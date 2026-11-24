@@ -6,6 +6,8 @@
   // Live reports may serve a cached HTML revision while the next one is generated.
   const style = document.createElement("style");
   style.textContent = `
+    .forecast-live-diagnostic {width:100%; min-width:0; order:2}
+    .forecast-live-diagnostic p {white-space:pre-line; overflow-wrap:anywhere; margin:0 0 6px; line-height:1.6}
     .topbar .forecast-refresh-status {
       flex: none; margin-inline-start: auto; align-self: center;
       color: var(--muted, #606775); font-size: 12px; white-space: nowrap;
@@ -50,14 +52,77 @@
     }
   }
   updateRefreshNotice(script.dataset.previousResult === "true");
+  let latestStatus;
+  function renderDiagnostic() {
+    const host = document.querySelector(".forecast-header-menu[open] .forecast-target-sources");
+    if (!host || !latestStatus) return;
+    let text = host.querySelector("[data-live-diagnostic]");
+    if (!text) {
+      const group = document.createElement("div");
+      group.className = "forecast-live-diagnostic";
+      text = document.createElement("p");
+      text.dataset.liveDiagnostic = "";
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.dataset.copyLiveDiagnostic = "";
+      copy.textContent = "复制刷新诊断";
+      copy.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(text.textContent);
+          copy.textContent = "已复制";
+        } catch {
+          const range = document.createRange();
+          range.selectNodeContents(text);
+          const selection = document.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          let copied = false;
+          try { copied = document.execCommand("copy"); } catch { /* Selection remains available. */ }
+          copy.textContent = copied ? "已复制" : "请复制所选文字";
+        }
+      };
+      group.append(text, copy);
+      host.append(group);
+    }
+    const status = latestStatus;
+    const short = id => id ? String(id).slice(0, 12) : "—";
+    const states = {starting:"启动中", ready:"已就绪", building:"生成中", stabilizing:"等待文件稳定", waiting:"等待文件稳定", error:"失败，等待重试"};
+    const diagnostic = [
+      "后台状态　" + (states[status.state] || status.state || "—"),
+      "刷新原因　" + (status.refresh_reason || "—"),
+      "最近生成成功　" + (status.last_success_at || "—"),
+      "当前显示　" + short(revision) + (status.previous_result ? "（上次结果）" : ""),
+      "目标页面版本　" + short(status.page_version),
+      "服务版本　" + short(status.service_version)
+    ].join("\n");
+    if (text.textContent !== diagnostic) text.textContent = diagnostic;
+  }
+  document.addEventListener("toggle", event => {
+    if (event.target.matches?.(".forecast-header-menu[open]")) renderDiagnostic();
+  }, true);
+
+  let frameInView = true;
+  const frame = globalThis.window?.frameElement;
+  if (frame && typeof IntersectionObserver === "function") {
+    const observer = new frame.ownerDocument.defaultView.IntersectionObserver(entries => {
+      const wasVisible = frameInView;
+      frameInView = entries[entries.length - 1].isIntersecting;
+      if (!wasVisible && frameInView) checkForUpdate();
+    });
+    observer.observe(frame);
+  }
+
   let checking = false;
   async function checkForUpdate() {
-    if (checking || document.hidden) return;
+    if (checking || document.hidden || !frameInView) return;
+    if (frame && (frame.getClientRects().length === 0 || frame.checkVisibility?.({visibilityProperty:true}) === false)) return;
     checking = true;
     try {
       const response = await fetch(statusUrl, {cache: "no-store"});
       if (!response.ok) return;
       const status = await response.json();
+      latestStatus = status;
+      renderDiagnostic();
       if (status.revision && status.revision !== revision) {
         // The dashboard saves the current model and manual inputs on pagehide.
         location.reload();

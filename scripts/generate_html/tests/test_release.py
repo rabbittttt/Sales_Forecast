@@ -11,7 +11,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from core.data_paths import PROJECT_ROOT, project_output_directory, dynamic_output_directory
-from core.release import build_release, runtime_revision
+from core.release import build_release, page_revision, runtime_revision
 
 
 class ReleaseTests(TestCase):
@@ -48,6 +48,32 @@ class ReleaseTests(TestCase):
             template = moved / "payload/scripts/generate_html/templates/forecast-live.js"
             template.write_bytes(template.read_bytes() + b"\n// changed fixture")
             self.assertNotEqual(runtime_revision(moved / "payload"), before)
+
+    def test_page_cache_tracks_generator_dependencies_independently_of_the_release(self):
+        with TemporaryDirectory() as folder:
+            release = Path(folder) / "release"
+            build_release(PROJECT_ROOT, release, "v1")
+            payload = release / "payload"
+            root = payload / "scripts/generate_html"
+            page = page_revision(PROJECT_ROOT)
+            self.assertEqual(page_revision(payload), page)
+            service = runtime_revision(payload)
+            (root / "modules/unregistered_fixture.py").write_text("pass", encoding="utf-8")
+            self.assertNotEqual(runtime_revision(payload), service)
+            self.assertEqual(page_revision(payload), page)
+            client = root / "templates/forecast-live.js"
+            client.write_bytes(client.read_bytes() + b"\n// polling-only change")
+            self.assertEqual(page_revision(payload), page)
+            registry = root / "modules/registry.py"
+            registry.write_bytes(registry.read_bytes() + b"\nfrom modules import unregistered_fixture")
+            page_registered = page_revision(payload)
+            self.assertNotEqual(page_registered, page)
+            (root / "modules/unregistered_fixture.py").write_text("x = 2", encoding="utf-8")
+            self.assertNotEqual(page_revision(payload), page_registered)
+            before_css = page_revision(payload)
+            css = root / "templates/dashboard.css"
+            css.write_bytes(css.read_bytes() + b"\n/* header change */")
+            self.assertNotEqual(page_revision(payload), before_css)
 
     def test_external_output_paths_are_project_relative_and_never_shared(self):
         with TemporaryDirectory() as folder:

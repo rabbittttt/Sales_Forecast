@@ -236,7 +236,9 @@ def _forecast_stage(launch_date: Any, end_date: Any = None, days: Any = None, to
             "key": "unknown", "label": "首销窗口冲突", "day": 0, "days": 0,
             "launch_date": start.isoformat(), "end_date": explicit_end.isoformat(),
         }
-    end = explicit_end or (start + timedelta(days=maintained_span - 1) if maintained_span > 0 else None)
+    end = explicit_end
+    if end is None and 0 < maintained_span <= (date.max - start).days + 1:
+        end = start + timedelta(days=maintained_span - 1)
     if end is None:
         return {
             "key": "unknown", "label": "首销截止日期与天数缺失", "day": 0, "days": 0,
@@ -1178,11 +1180,12 @@ def _iso_week_bounds(value: Any) -> tuple[date, date] | None:
     return start, start + timedelta(days=6)
 
 
-def _fill_sparse_dates(rows, fields, coverage=(), start=None, end=None):
+def _fill_sparse_dates(rows, fields, coverage=(), start=None, end=None, *, before=None):
     """Absent export columns inside observed coverage mean zero, not blank cells.
 
     Physical-file coverage can extend beyond this model's last sale. Never fill
     outside those export intervals or overwrite an explicit blank/invalid cell.
+    Only infer zeros for dates strictly before the open business day, when given.
     Duplicate dates remain intact so downstream validation can reject them.
     """
     by_date = {row["date"]: row for row in rows if row.get("date")}
@@ -1197,11 +1200,14 @@ def _fill_sparse_dates(rows, fields, coverage=(), start=None, end=None):
         return rows
     for first, last in intervals:
         current, finish = max(first, start) if start else first, min(last, end) if end else last
-        while current <= finish:
-            key = current.isoformat()
+        # An exclusive open-day cutoff also works on the first representable date.
+        stop = finish.toordinal() + 1
+        if before is not None:
+            stop = min(stop, before.toordinal())
+        for ordinal in range(current.toordinal(), stop):
+            key = date.fromordinal(ordinal).isoformat()
             if key not in by_date:
                 by_date[key] = {"date": key, **{field: 0 for field in fields}, "absent_as_zero": True}
-            current += timedelta(days=1)
     return [by_date[key] for key in sorted(by_date)]
 
 
@@ -1227,7 +1233,7 @@ def _read_steady_daily(workbook, generation: str, start: date, today: date, cove
                                '_field_origins': {'lock': cell_source_text(sheet, row, col, source_item.path.name if source_item else "")} if valid else {}})
             source_sheets.append(sheet.title)
             break
-    result = (_fill_sparse_dates(sorted(result, key=lambda row:row['date']), ("lock",), coverage, start, today)
+    result = (_fill_sparse_dates(sorted(result, key=lambda row:row['date']), ("lock",), coverage, start, before=today)
               if source_sheets else result)
     for row in result:
         row["complete"] = row["date"] < today.isoformat()
@@ -2004,7 +2010,7 @@ def _read_actual_profiles(store, stage_windows=None, today=None) -> tuple[list[d
             known_dates = [day for row in daily_rows if (day := _as_date(row.get("date"))) is not None]
             start = _as_date(window.get("small_start_date")) or (min(known_dates) if known_dates else None)
             end = min(_as_date(window.get("small_end_date")) or (today or date.today()), today or date.today())
-            daily_rows = _fill_sparse_dates(daily_rows, ("orders",), small_coverage, start, end) if start else daily_rows
+            daily_rows = _fill_sparse_dates(daily_rows, ("orders",), small_coverage, start, end, before=today or date.today()) if start else daily_rows
             if not daily_rows:
                 continue
             source = SourceRef(small_mix_item.path.name, sheet.title, "小订选配比例by天真实小订")
@@ -2203,7 +2209,7 @@ def _read_actual_profiles(store, stage_windows=None, today=None) -> tuple[list[d
                     actual_days.append({"date": day.isoformat(), **values, "_field_origins": origins})
             if not matched:
                 continue
-            actual_days = _fill_sparse_dates(actual_days, ("gross", "net"), _source_date_ranges(order_item), start, min(finish, today or date.today()))
+            actual_days = _fill_sparse_dates(actual_days, ("gross", "net"), _source_date_ranges(order_item), start, finish, before=today or date.today())
             for row in actual_days:
                 origins = row.setdefault("_field_origins", {})
                 for field in ("gross", "net"):

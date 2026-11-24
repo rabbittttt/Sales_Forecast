@@ -1153,10 +1153,18 @@ def fit_summary_columns(sheet):
                 cell.number_format = "General"
 
 
-def forecast_signature(source, mapping, directory, as_of_date):
-    paths = [source, mapping, *forecast_order_files(directory), *REFRESH_CODE_DEPENDENCIES]
-    facts = [(str(path.resolve()), path.stat().st_size, path.stat().st_mtime_ns) for path in paths]
-    return hashlib.sha256(json.dumps([as_of_date or date.today().isoformat(), facts], ensure_ascii=False).encode()).hexdigest()
+def forecast_signature(source, mapping, directory, as_of_date, *, legacy=False):
+    inputs = [source, mapping, *forecast_order_files(directory)]
+    if legacy:
+        inputs.extend(REFRESH_CODE_DEPENDENCIES)
+    facts = [(str(path.resolve()), path.stat().st_size, path.stat().st_mtime_ns) for path in inputs]
+    if not legacy:
+        # Identical calculation code can be installed in a new release directory
+        # with new mtimes. Only its content affects the workbook.
+        facts.extend((path.relative_to(GENERATE_HTML_ROOT).as_posix(), hashlib.sha256(path.read_bytes()).hexdigest())
+                     for path in REFRESH_CODE_DEPENDENCIES)
+    digest = hashlib.sha256(json.dumps([as_of_date or date.today().isoformat(), facts], ensure_ascii=False).encode()).hexdigest()
+    return digest if legacy else "v2:" + digest
 
 
 def append_forecast_inputs(workbook, source, mapping_path, orders_dir, as_of_date, preserve_layout=True, *, cache_dir=None):
@@ -1872,7 +1880,10 @@ def summary_is_current(source, output, mapping, orders_dir, as_of_date):
             identifier = book.properties.identifier
         finally:
             book.close()
-    return identifier == forecast_signature(source, mapping, orders_dir, as_of_date)
+    if not isinstance(identifier, str):
+        return False
+    return identifier == forecast_signature(source, mapping, orders_dir, as_of_date,
+                                            legacy=not identifier.startswith("v2:"))
 
 
 def resolve_source_path(requested: Path) -> Path:
@@ -1898,7 +1909,7 @@ def resolve_source_path(requested: Path) -> Path:
 
 
 def output_is_current(source: Path, output: Path, mapping: Path) -> bool:
-    """Return true when the generated workbook is newer than every dependency."""
+    """Fast input and ZIP sanity check; calculation content is checked in the workbook signature."""
     if not output.exists() or output.stat().st_size < 4:
         return False
     try:
@@ -1906,7 +1917,7 @@ def output_is_current(source: Path, output: Path, mapping: Path) -> bool:
             if handle.read(4) != b"PK\x03\x04":
                 return False
         output_time = output.stat().st_mtime_ns
-        dependencies = (source, mapping, *REFRESH_CODE_DEPENDENCIES)
+        dependencies = (source, mapping)
         return all(path.exists() and path.stat().st_mtime_ns <= output_time for path in dependencies)
     except OSError:
         return False

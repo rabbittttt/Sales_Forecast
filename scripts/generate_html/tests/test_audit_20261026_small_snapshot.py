@@ -27,12 +27,12 @@ function run(input){
  const target={name:'current',smallStartDate:'2026-09-01',smallEndDate:'2026-09-04',smallDays:4,tier:'SUV',energy:'BEV',node:'new'};
  const reference={model:'reference',event_id:'ref',total:1000,days:4,tier:'SUV',energy:'BEV',node:'new',
   small_start_date:'2026-08-01',small_progress:input.curve??[.25,.5,.75,1],daily_orders:[250,250,250,250],d1_share:.25,
-  small_start_hour:0,small_hourly_curve:Array.from({length:24},(_,i)=>(i+1)/24)};
+  small_start_hour:0,small_hourly_curve:input.reference_hours??Array.from({length:24},(_,i)=>(i+1)/24)};
  const today=input.today??'2026-09-03';
  const fixed=input.fixed??[{date:'2026-09-01',orders:100},{date:'2026-09-02',orders:200}];
- const actual={total_small:input.terminal??0,small_daily_days:[...fixed],small_hourly_days:[]};
+ const actual={total_small:input.terminal??0,small_daily_days:[...fixed],small_hourly_days:[...(input.history_hours??[])]};
  if('day' in input)actual.small_daily_days.push({date:today,orders:input.day});
- if('hour' in input)actual.small_hourly_days.push({date:today,orders:input.hour,hours:input.hours??[]});
+ if('hour' in input)actual.small_hourly_days.push({date:today,orders:input.hour,last_hour:input.last_hour,hours:input.hours??[]});
  const calendarType=(start,index)=>({date:new Date(Date.parse(start+'T00:00:00Z')+index*86400000).toISOString().slice(0,10),type:'workday'});
  const ctx={window:{ForecastMath:math},console:{warn:()=>{}},smallReferenceScore:math.smallReferenceScore,completedSmallOrderDays:math.completedSmallOrderDays,
   fmt:String,esc:String,renderLifecycleBars:()=>'',renderLifecycleLineChart:()=>'',renderLifecycleScorePage:()=>'',
@@ -63,6 +63,28 @@ console.log(JSON.stringify(JSON.parse(process.argv[1]).map(run)));
             {'date': '2026-09-01', 'orders': 100, 'actual': True},
             {'date': '2026-09-02', 'orders': 200, 'actual': True}])
         self.assertEqual(sum(row['orders'] for row in result['rows']), result['total'])
+
+    def test_active_day_uses_hourly_progress_or_keeps_the_daily_allocation(self):
+        snapshot = {'hour': 60, 'hours': [{'hour': 12, 'orders': 60}], 'last_hour': 12}
+        history = [{'date': '2026-09-02', 'orders': 200, 'last_hour': 20,
+                    'hours': [{'hour': 12, 'orders': 100}, {'hour': 20, 'orders': 100}]}]
+        own, missing, baseline = self.run_cases([
+            {**snapshot, 'history_hours': history},
+            {**snapshot, 'reference_hours': []},
+            {'reference_hours': []},
+        ])
+        for result in (own, missing, baseline):
+            self.assert_known_days_preserved(result)
+            self.assertEqual(result['stage'], 'active')
+            self.assertFalse(result['rows'][2]['actual'])
+        self.assertEqual(own['rows'][2]['observed'], 60)
+        self.assertEqual(own['rows'][2]['orders'], 120)
+        self.assertIn('本车型完整日', own['source'])
+        self.assertIn('50.0%', own['source'])
+        self.assertEqual(missing['rows'][2]['observed'], 60)
+        self.assertEqual([r['orders'] for r in missing['rows']], [r['orders'] for r in baseline['rows']])
+        self.assertNotEqual(missing['rows'][2]['orders'], own['rows'][2]['orders'])
+        self.assertIn('缺少可用的同期完成率', missing['source'])
 
     def test_more_recent_hourly_snapshot_bounds_today_and_terminal(self):
         result = self.run_cases([{'day': 999, 'hour': 1200}])[0]

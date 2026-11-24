@@ -13,9 +13,9 @@ from openpyxl.styles import Font
 from core.excel import WorkbookItem, WorkbookStore, load_data_workbook, parse_metric_sheet
 from core.models import Dashboard, SourceRef, Subject
 from modules.sales_forecast import _read_actual_profiles, _read_steady_history
-from modules.conversion import ConversionModule, STAGES
-from modules.order_mix import OrderMixModule
-from modules.option_fee import _period_groups, _option_layout, _version_rows_by_period
+from tests.legacy_order.conversion import ConversionModule, STAGES
+from tests.legacy_order.order_mix import OrderMixModule
+from tests.legacy_order.option_fee import _period_groups, _option_layout, _version_rows_by_period
 from tools.refresh_sales_forecast_data import append_forecast_inputs
 from core.forecast_summary import summary_scope
 

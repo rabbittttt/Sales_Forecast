@@ -28,3 +28,20 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
       - run: python -m unittest discover -s tests
+      - name: Test embedded forecast with synthetic data
+        env:
+          FORECAST_TEST_PYTHON: python
+          FORECAST_SCREENSHOTS: ${{ runner.temp }}/forecast-screenshots
+        run: |
+          $deps = Join-Path $env:RUNNER_TEMP 'forecast-browser'
+          npm install --prefix $deps --no-save --ignore-scripts --no-package-lock playwright@1.56.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PLAYWRIGHT_MODULE = Join-Path $deps 'node_modules/playwright'
+          node tests/forecast_page_smoke.cjs --portal-fixture
+      - name: Save synthetic header screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forecast-header
+          path: ${{ runner.temp }}/forecast-screenshots/
+          if-no-files-found: ignore

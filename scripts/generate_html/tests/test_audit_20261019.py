@@ -13,7 +13,7 @@ from core.excel import WorkbookItem, WorkbookStore
 from core.models import Subject
 from core.renderer import render_dashboard
 from modules.sales_forecast import _history_item
-from modules.sku import SkuModule
+from tests.legacy_order.sku import SkuModule
 
 ROOT = Path(__file__).resolve().parents[1]
 

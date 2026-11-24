@@ -54,6 +54,35 @@ class SummaryRecoveryTests(TestCase):
         self.source.write_bytes(b'changed source')
         self.assertFalse(self.current())
 
+    def test_identical_code_in_new_release_reuses_workbook_and_changed_code_invalidates_it(self):
+        def environment(root):
+            dependency = root / "compute.py"
+            return patch.multiple(refresh, GENERATE_HTML_ROOT=root, REFRESH_CODE_DEPENDENCIES=(dependency,))
+
+        a, b = self.root / "v1", self.root / "v2"
+        for release in (a, b):
+            release.mkdir()
+            (release / "compute.py").write_text("value=1", encoding="utf-8")
+        with environment(a):
+            book = load_workbook(self.output)
+            book.properties.identifier = refresh.forecast_signature(self.source, self.source, self.root, '2026-09-05')
+            book.save(self.output)
+            book.close()
+        os.utime(b / "compute.py", (time.time() + 600,) * 2)
+        with environment(b):
+            self.assertTrue(self.current())
+            (b / "compute.py").write_text("value=2", encoding="utf-8")
+            self.assertFalse(self.current())
+
+    def test_matching_legacy_signature_remains_readable(self):
+        book = load_workbook(self.output)
+        book.properties.identifier = refresh.forecast_signature(self.source, self.source, self.root, '2026-09-05', legacy=True)
+        book.save(self.output)
+        book.close()
+        self.assertTrue(self.current())
+        self.source.write_bytes(b"changed source")
+        self.assertFalse(self.current())
+
     def test_truncated_zip_is_cache_miss_and_releases_output(self):
         self.output.write_bytes(b'PK\x03\x04truncated workbook')
         self.touch_output()

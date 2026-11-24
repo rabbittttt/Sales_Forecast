@@ -799,14 +799,54 @@
     return intradayComponents(known,floor.observed>0?floor.observed/Math.max(total,floor.observed):1,smallShare);
   }
 
-  function intradayReference({buckets=[],days=[],today,launchDate,dayType=()=>''}){
-    const totals=new Map(days.filter(row=>row.date<today).map(row=>[row.date,row.gross])),curves=[];
+  // Timestamps on a real hourly series are the only evidence for the observation hour.
+  // The page build time only rules out future columns in a same-day export.
+  function asOfHourlyBucket(bucket, metric, generatedAt) {
+    if (!bucket || bucket.hourly_valid === false) return bucket;
+    const stamp = String(generatedAt || '').match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):/);
+    if (!stamp || stamp[1] !== bucket.date) return bucket;
+    const limit = Number(stamp[2]), original = bucket.hours || [];
+    const hours = original.filter(row => row.hour <= limit);
+    if (hours.length === original.length) return bucket;
+    const result = {...bucket, hours, last_hour: hours.reduce((end,row)=>Math.max(end,row.hour),-1)};
+    const fields = metric === 'gross' ? ['gross','small_to_big','direct','lock'] : [metric];
+    for (const field of fields) {
+      // Older snapshots may only have component totals. They remain usable
+      // when discarding zero-only future placeholders, not future sales.
+      if (hours.length && hours.every(row=>Number.isFinite(row[field]) && row[field]>=0))
+        result[field] = hours.reduce((sum,row)=>sum+row[field],0);
+      else if (!hours.length || original.some(row=>row.hour>limit && row[metric]!==0))
+        result[field] = null;
+    }
+    return result;
+  }
+
+  function usableHourlySnapshot(bucket, metric) {
+    if (!bucket || bucket.hourly_valid === false || !(bucket[metric] > 0) ||
+        !Number.isInteger(bucket.last_hour) || bucket.last_hour<0 || bucket.last_hour>23) return false;
+    const hours = bucket.hours || [];
+    return hours.length>0 && new Set(hours.map(row=>row.hour)).size===hours.length &&
+      hours.every(row=>Number.isInteger(row.hour) && row.hour>=0 && row.hour<=bucket.last_hour &&
+        Number.isFinite(row[metric]) && row[metric]>=0) &&
+      Math.max(...hours.map(row=>row.hour))===bucket.last_hour &&
+      hours.reduce((sum,row)=>sum+row[metric],0)===bucket[metric];
+  }
+
+  function allocateIntraday(values, observed, projected) {
+    if (!values.length || !Number.isFinite(projected) || projected <= 0)
+      return applyObservedFloor(values, observed).values;
+    const first=Math.max(Math.round(projected),Math.ceil(observed)),before=values.reduce((a,b)=>a+b,0);
+    return [first,...distributeInteger(Math.max(0,before-first),values.slice(1))];
+  }
+
+  function intradayReference({buckets=[],days=[],today,launchDate,dayType=()=>'',metric='gross'}){
+    const totals=new Map(days.filter(row=>row.date<today).map(row=>[row.date,row[metric]])),curves=[];
     for(const bucket of buckets){
-      if(bucket.date<=launchDate||bucket.date>=today||!bucket.hours?.length)continue;
+      if(bucket.hourly_valid===false||bucket.date<=launchDate||bucket.date>=today||!bucket.hours?.length)continue;
       const daily=totals.get(bucket.date),hours=Array(24).fill(0);
       if(!(daily>0))continue;
       let valid=true;
-      for(const row of bucket.hours){if(!Number.isInteger(row.hour)||row.hour<0||row.hour>23||typeof row.gross!=='number'||row.gross<0||!Number.isFinite(row.gross)){valid=false;break;}hours[row.hour]+=row.gross;}
+      for(const row of bucket.hours){if(!Number.isInteger(row.hour)||row.hour<0||row.hour>23||typeof row[metric]!=='number'||row[metric]<0||!Number.isFinite(row[metric])){valid=false;break;}hours[row.hour]+=row[metric];}
       if(!valid||Math.abs(hours.reduce((a,b)=>a+b,0)-daily)>.5)continue;
       let running=0;curves.push({date:bucket.date,values:hours.map(value=>(running+=value)/daily)});
     }
@@ -861,6 +901,9 @@
     normalizedShapeSimilarity,
     launchHourlyItem,
     applyObservedFloor,
+    asOfHourlyBucket,
+    usableHourlySnapshot,
+    allocateIntraday,
     intradayReference,
     intradayComponents,
     hourlyComparison,

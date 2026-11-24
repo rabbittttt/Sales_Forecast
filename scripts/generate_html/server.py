@@ -21,11 +21,12 @@ from core.data_paths import (
     PROJECT_ROOT, assert_output_is_private, orders_input_directory,
     dynamic_output_directory, dynamic_log_directory, forecast_summary_path,
 )
+from core.config import SUMMARY_REUSE_UNAVAILABLE
 from core.live_server import (
-    ForecastServer, LiveMonitor, SUMMARY_REUSE_UNAVAILABLE, normalize_prefix,
+    ForecastServer, LiveMonitor, normalize_prefix,
     previous_published_page, scan_inputs,
 )
-from core.release import runtime_revision
+from core.release import page_revision, runtime_revision
 from core.renderer import FORECAST_PAGE_NAME
 
 
@@ -86,20 +87,21 @@ def main() -> int:
                                   logging.FileHandler(log_dir / "live_server.log", encoding="utf-8")])
     input_dir = args.input.resolve()
     source_key = hashlib.sha256(f"{input_dir}|{orders_input_directory(PROJECT_ROOT).resolve()}".encode("utf-8")).hexdigest()[:16]
-    revision = runtime_revision(PROJECT_ROOT)
-    # Keep each version's generated page and startup checkpoint separate.
-    live_dir = assert_output_is_private(output_root / source_key / revision)
-    instance_id = hashlib.sha256(f"{PROJECT_ROOT}|{live_dir}|{args.public_prefix}".encode("utf-8")).hexdigest()
+    service_version = runtime_revision(PROJECT_ROOT)
+    page_version = page_revision(PROJECT_ROOT)
+    live_dir = assert_output_is_private(output_root / source_key / page_version)
+    instance_id = hashlib.sha256(f"{PROJECT_ROOT}|{live_dir}|{service_version}|{args.public_prefix}".encode("utf-8")).hexdigest()
     monitor = LiveMonitor(lambda: scan_inputs(input_dir),
                           lambda: build_page(input_dir, live_dir),
                           output_file=live_dir / FORECAST_PAGE_NAME,
+                          service_version=service_version, page_version=page_version,
                           cache_files=(forecast_summary_path(PROJECT_ROOT),),
                           build_from_current_summary=lambda: build_page(input_dir, live_dir, reuse_summary_only=True))
     monitor.restore()
     if monitor.page()[0] is None:
         previous_page = previous_published_page(live_dir)
         if previous_page is not None:
-            monitor.seed(previous_page, previous=True)
+            monitor.seed(previous_page, previous=True, reason="页面生成代码或模板版本变化")
             LOGGER.info("已载入上次成功生成的页面，当前版本将在后台生成")
     try:
         server = ForecastServer((args.host, args.port), monitor, live_dir / "forecast_assets", instance_id, args.public_prefix,

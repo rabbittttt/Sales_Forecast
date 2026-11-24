@@ -108,6 +108,31 @@ class InputSnapshotTests(TestCase):
         source.write_bytes(b"model dates")
         self.assertNotEqual(configured, self.scan())
 
+    def test_reinstalling_identical_config_does_not_trigger_a_refresh(self):
+        baseline = self.scan()
+        self.config.write_text('{ // same effective settings\n}', encoding="utf-8")
+        self.assertEqual(self.scan(), baseline)
+
+    def test_moved_release_with_identical_config_restores_previous_checkpoint(self):
+        clock = FakeClock()
+        builder = Mock(return_value=b"published")
+        output = self.root / "external-runtime" / FORECAST_PAGE_NAME
+        first = LiveMonitor(self.scan, builder, clock=clock, output_file=output, stable_seconds=0)
+        first.tick()
+        first.tick()
+        self.assertEqual(first.status()["state"], "ready")
+        moved_project = self.root / "relaunched"
+        moved_config = moved_project / self.config.relative_to(self.project)
+        moved_config.parent.mkdir(parents=True)
+        moved_config.write_bytes(self.config.read_bytes())
+        os.utime(moved_config, (1_800_000_000, 1_800_000_000))
+        second = LiveMonitor(lambda: scan_inputs(self.orders, moved_project), builder, output_file=output)
+        self.assertTrue(second.restore())
+        second.tick()
+        self.assertEqual(second.status()["state"], "ready")
+        self.assertEqual(second.status()["last_success_at"], first.status()["last_success_at"])
+        builder.assert_called_once()
+
     def test_derived_locked_hidden_and_non_workbook_files_do_not_trigger(self):
         before = self.scan()
         for folder in (self.orders, self.references, self.models):
@@ -435,6 +460,38 @@ class LiveMonitorTests(TestCase):
         self.tick_after(1)
         self.assertEqual(self.build.call_count, 2)
         self.assertEqual(self.monitor.page()[0], b"<html>stable inputs</html>")
+
+    def test_input_diagnostics_explain_workbook_and_business_date_without_paths(self):
+        self.publish_initial()
+        self.current = snapshot("2026-11-12", (("/private/内部车型-大定选配比例.xlsx", 95, 20),))
+        self.tick_after(300)
+        status = self.monitor.status()
+        self.assertTrue(status["previous_result"])
+        self.assertIn("业务日期", status["refresh_reason"])
+        self.assertIn("2 份输入工作簿", status["refresh_reason"])
+        self.assertIn("大定选配比例", status["refresh_reason"])
+        self.assertNotIn("private", status["refresh_reason"])
+        self.assertNotIn("内部车型", status["refresh_reason"])
+        self.tick_after(60)
+        self.assertTrue(self.monitor.status()["last_success_at"])
+        self.assertFalse(self.monitor.status()["previous_result"])
+
+    def test_visual_config_update_reuses_current_summary_after_stability_wait(self):
+        self.current = snapshot(files=(("config.json", 1, 1),))
+        reuse = Mock(return_value=b"first")
+        monitor = LiveMonitor(self.scan, self.build, clock=self.clock, build_from_current_summary=reuse)
+        monitor.tick()
+        self.current = snapshot(files=(("config.json", 1, 2),))
+        self.clock.advance(300)
+        monitor.tick()
+        self.assertEqual(monitor.status()["state"], "waiting")
+        self.assertEqual(reuse.call_count, 1)
+        self.clock.advance(60)
+        reuse.return_value = b"second"
+        monitor.tick()
+        self.assertEqual(monitor.page()[0], b"second")
+        self.assertEqual(monitor.status()["refresh_reason"], "预测配置变化")
+        self.build.assert_not_called()
 
     def test_old_page_remains_readable_while_build_is_running(self):
         self.monitor.seed(b"<html>last good</html>")
@@ -841,6 +898,7 @@ class StartupReuseTests(TestCase):
             stack.enter_context(patch.object(entry, "PROJECT_ROOT", root / "project"))
             stack.enter_context(patch.object(entry, "parse_args", return_value=args))
             stack.enter_context(patch.object(entry, "runtime_revision", return_value="new-runtime"))
+            stack.enter_context(patch.object(entry, "page_revision", return_value="new-page-version"))
             stack.enter_context(patch.object(entry, "dynamic_output_directory", return_value=root / "dynamic"))
             stack.enter_context(patch.object(entry, "orders_input_directory", return_value=root / "shared-orders"))
             stack.enter_context(patch.object(entry, "LiveMonitor"))

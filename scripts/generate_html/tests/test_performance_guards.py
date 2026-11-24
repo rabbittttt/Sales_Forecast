@@ -14,7 +14,7 @@ from openpyxl.utils.indexed_list import IndexedList
 from tools import refresh_sales_forecast_data as refresh
 
 from core.excel import parse_metric_sheet
-from modules.option_fee import _option_layout
+from tests.legacy_order.option_fee import _option_layout
 from tools.refresh_sales_forecast_data import (
     REFRESH_CODE_DEPENDENCIES,
     find_header_row,

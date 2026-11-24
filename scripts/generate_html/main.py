@@ -20,12 +20,11 @@ from openpyxl import load_workbook
 from core.build_lock import build_lock
 from core.components import add_kpi_comparisons
 from core.china_calendar import PUBLISHED_YEARS
-from core.config import load_config
+from core.config import load_config, SUMMARY_REUSE_UNAVAILABLE
 from core.data_paths import orders_input_directory, assert_output_is_private, forecast_summary_path, assert_summary_output, project_output_directory, static_output_directory
 from core.discovery import discover_subjects, set_capabilities
 from core.excel import WorkbookStore, clean_text, format_excel_cell, reset_conflict_diagnostics
 from core.forecast_summary import SUMMARY_NAME, visible_target_names
-from core.live_server import SUMMARY_REUSE_UNAVAILABLE
 from core.model_identity import FORECAST_SOURCE_PATH
 from core.renderer import b64gzip, render_dashboard, forecast_manifest
 from core.validation import validate_manifest

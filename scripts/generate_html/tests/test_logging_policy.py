@@ -10,7 +10,7 @@ from core.excel import (WorkbookItem, WorkbookStore, _merge_matrix, _merge_parti
                         compact_diagnostic_ranges, _coordinate_ranges, _diagnostic_location, reset_conflict_diagnostics)
 from core.models import Subject
 from core.validation import validate_manifest
-from modules.generic import GenericModule
+from tests.legacy_order.generic import GenericModule
 import main
 
 
@@ -255,7 +255,7 @@ class LoggingPolicyTests(TestCase):
         sheet = book.create_sheet('其他车型by天'); sheet.cell(1, 1, '其他车型')
         store = WorkbookStore(Path('.')); store.items = [WorkbookItem(Path('大定选配比例.xlsx'), book)]
         subject = Subject('generation_test', '车型', 'generation')
-        with self.assertLogs('modules.generic', level='WARNING') as logs:
+        with self.assertLogs('tests.legacy_order.generic', level='WARNING') as logs:
             result = GenericModule().build(store, subject)
         empty = [line for line in logs.output if '无数值数据' in line and '1行×1列' in line]
         self.assertEqual(len(empty), 1)
