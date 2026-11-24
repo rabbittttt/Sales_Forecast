@@ -5195,9 +5195,6 @@ body.forecast-app .module-bar:has(#forecastHeaderTools) {
   grid-template-areas:"stage views time tools reset"; gap:8px 12px; align-items:center;
 }
 body.forecast-app .module-bar #moduleNav {grid-area:stage; width:auto}
-body.forecast-app #moduleNav [data-forecast-nav][aria-current=page] {
-  background:var(--primary-strong); color:white; font-weight:700;
-}
 body.forecast-app .module-bar .top-actions {grid-area:time; color:var(--muted); font-size:12px}
 body.forecast-app #forecastHeaderTools:not([hidden]),
 body.forecast-app #forecastHeaderTools > .forecast-target-meta {display:contents}
