@@ -961,6 +961,10 @@ button:focus-visible,select:focus-visible,input:focus-visible {
   outline-offset:2px;
 }
 
+.planhub-embedded .topbar > .brand > .brand-mark {
+  display:none;
+}
+
 .brand-mark {
   place-items:center;
   color:#fff;

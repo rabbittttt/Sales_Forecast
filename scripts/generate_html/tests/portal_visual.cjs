@@ -36,6 +36,14 @@ async function capture(browser, gateway, fixtureOrigin, output, label, live) {
     const iframe = page.locator('iframe[data-app="forecast"]');
     await iframe.waitFor();
     const frame = page.frameLocator('iframe[data-app="forecast"]');
+    const mark = '.topbar > .brand > .brand-mark';
+    await frame.locator('.brand strong').waitFor();
+    assert.equal(await frame.locator(mark).isVisible(), false, 'PlanHub title should omit the forecast icon');
+    const standalone = await context.newPage();
+    try {
+      await standalone.goto(fixtureOrigin + '/forecast/');
+      await standalone.locator(mark).waitFor({state:'visible'});
+    } finally { await standalone.close(); }
     const model = frame.getByRole('combobox', {name:'预测车型', exact:true});
     await model.waitFor();
     assert.equal((await model.locator('option:checked').textContent()).trim(), '测试车型 A');
