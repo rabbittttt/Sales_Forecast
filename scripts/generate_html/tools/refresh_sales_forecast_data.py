@@ -32,7 +32,7 @@ if str(GENERATE_HTML_ROOT) not in sys.path:
 from core.forecast_headers import (
     HeaderScan, InputFormatError, MissingProgressSheet, PROGRESS_SPECS, SUMMARY_HEADER_ALIASES, canonical_header,
     day_number, find_header_row, find_progress_sheet, find_summary_sheet, header_key,
-    row_headers, scan_header_rows, workbook_header_index,
+    row_headers, scan_header_rows, workbook_header_index, launch_end_value,
 )
 from core.model_identity import model_key, usable_attribute, stage_records, stage_name, resolve_stage_identity, generation_records, FORECAST_SOURCE_PATH
 from core.forecast_summary import SUMMARY_NAME, INDEX_SHEET, GUIDE_SHEET, DAILY_SHEET, WEEKLY_SHEET, D12_SHEET, D12_HEADERS, public_forecast_tables, summary_scope, summary_quality, table_records, iso_day
@@ -381,8 +381,16 @@ def read_summary(workbook, header_index: dict[str, HeaderScan]) -> list[dict[str
     result = []
     blank_rows = 0
     seen_models: dict[str, int] = {}
-    for row_number, values in enumerate(sheet.iter_rows(min_row=header_row + 1, values_only=True), header_row + 1):
+    rows = sheet.iter_rows(min_row=header_row, values_only=True)
+    # The discovery scan canonicalizes these columns to the same legacy name;
+    # retain each source header until the per-row explicit cutoff is selected.
+    end_indices = {header_key(label): i for i, label in enumerate(next(rows))
+                   if canonical_header(label) == "小转大结束日期"}
+    for row_number, values in enumerate(rows, header_row + 1):
         record = dict(zip(headers, values))
+        record["小转大结束日期"] = launch_end_value({
+            name: values[index] for name, index in end_indices.items() if index < len(values)
+        })
         primary = str(record.get("车型") or "").strip()
         model = str(record.get("二级代际名") or primary).strip()
         record["代际名"] = primary
@@ -1105,10 +1113,11 @@ def forecast_weekly_orders(store, dashboard, today, daily_output=None, *, collec
     """Collect quantities after file-boundary merging, split stage-boundary weeks by day."""
     from modules.sales_forecast import (_iso_week_bounds, _as_date, _canonical_model,
         _read_model_mapping, _fill_sparse_dates, _optional_count, _forecast_event_sheets)
+    from core.forecast_summary import daily_launch_stage, daily_stage_targets
     from core.excel import (sheet_subject, display_period, _source_date_ranges, subject_type,
                             cell_source_text, covered_date_source_text)
     data = dashboard.views["week"]["pages"]["预测方案"]["workspace"]["data"]
-    targets = {r["name"]: r for r in [*data.get("targets", []), *data.get("steady_targets", [])]}
+    targets = daily_stage_targets(data)
     mapping = _read_model_mapping()
     cached = "mix_weekly" in data
     daily, weekly = data.get("mix_daily", {}), data.get("mix_weekly", {})
@@ -1182,7 +1191,10 @@ def forecast_weekly_orders(store, dashboard, today, daily_output=None, *, collec
             if row.get("date"):
                 for field in ("gross", "net", "lock"):
                     resolved[(profile["model"], row["date"], field)] = (row.get(field), DAILY_SHEET + "｜字段来源")
+    flat_daily = set()
     if resolved_daily is not None:
+        flat_daily = {(r["订单分析代际名"], iso_day(r["日期"])) for r in resolved_daily
+                      if "平销" in str(r.get("订单阶段") or "").split("/")}
         resolved = {(r["订单分析代际名"], iso_day(r["日期"]), field): (r.get(label), DAILY_SHEET + "｜字段来源")
                     for r in resolved_daily for field, label in (("gross", "大定"), ("net", "留存大定"), ("lock", "交车锁单"))}
     periods = {(model, period) for model, period, _ in weekly}
@@ -1199,22 +1211,24 @@ def forecast_weekly_orders(store, dashboard, today, daily_output=None, *, collec
                 current_updated.setdefault(model, set()).add(day)
     for model, period in sorted(periods):
         target = targets.get(model, {})
-        launch, finish = _as_date(target.get("launch_date")), _as_date(target.get("end_date"))
         bounds = _iso_week_bounds(period)
         if not bounds:
             continue
+        week_dates = [bounds[0] + timedelta(days=i) for i in range(7)]
+        dates_by_stage = {}
+        for day in week_dates:
+            dates_by_stage.setdefault(daily_launch_stage(target, day), []).append(day)
         if bounds[0] > today:
             # Preserve explicit future source observations, without filling
             # unobserved days or making them eligible completed-week references.
-            stage = ("阶段未知" if not launch or not finish else "首销前" if bounds[1] < launch else
-                     "平销" if bounds[0] > finish else "首销" if launch <= bounds[0] <= bounds[1] <= finish else "首销/平销")
+            stage = "/".join(dates_by_stage)
             entries = [weekly.get((model, period, field), (None, None)) for field in ("gross", "net", "lock")]
             if any(entry[0] is not None for entry in entries):
                 rows.append([model, period, stage, datetime.combine(bounds[0], datetime.min.time()),
                              datetime.combine(bounds[1], datetime.min.time()),
                              *[e[0] for e in entries], *[e[1] for e in entries], False])
             continue
-        if not launch or not finish or bounds[1] < launch:
+        if len(dates_by_stage) == 1 and next(iter(dates_by_stage)) in {"首销前", "阶段未知"}:
             start, end = bounds[0], min(bounds[1], today)
             values, sources = [], []
             for field in ("gross", "net", "lock"):
@@ -1227,33 +1241,38 @@ def forecast_weekly_orders(store, dashboard, today, daily_output=None, *, collec
                 values.append(value)
                 sources.append(source)
             if any(v is not None for v in values):
-                rows.append([model, period, "阶段未知" if not launch or not finish else "首销前",
+                rows.append([model, period, next(iter(dates_by_stage)),
                              datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()),
                              *values, *sources, False])
             continue
-        for stage, first, last in (("首销", launch, finish), ("平销", finish + timedelta(days=1), today)):
-            start, end = max(bounds[0], first), min(bounds[1], last, today)
-            # A current partial week is not a stage-boundary split. Keep only
-            # the dates actually updated; omitted covered dates were filled at
-            # the physical-file merge, future/unupdated dates remain unknown.
-            stage_split = first > bounds[0] or (stage == "首销" and last < bounds[1])
-            if bounds[0] <= today <= bounds[1]:
-                observed = [date.fromisoformat(day) for day in current_updated.get(model, ())
-                            if start.isoformat() <= day <= end.isoformat()]
-                if observed:
-                    end = min(end, max(observed))
-            if start > end:
+        # Use the same calendar as the daily sheet. A parent can leave and
+        # re-enter first sale in one week when editions launch separately.
+        for stage, stage_dates in dates_by_stage.items():
+            if stage not in {"首销", "平销"}:
                 continue
-            whole = start == bounds[0] and end == bounds[1]
+            days = [d for d in stage_dates if d <= today]
+            if bounds[0] <= today <= bounds[1]:
+                observed = [d for d in days if d.isoformat() in current_updated.get(model, ())]
+                if observed:
+                    days = [d for d in days if d <= observed[-1]]
+            if not days:
+                continue
+            start, end = days[0], days[-1]
+            stage_split = len(stage_dates) < 7
+            whole = len(days) == 7
             values, sources = [], []
             for field in ("gross", "net", "lock"):
                 values_by_day = []
-                current = start
-                while current <= end:
+                for current in days:
                     key = (model, current.isoformat(), field)
-                    candidates = [resolved.get(key), daily.get(key)] if stage == "首销" else [daily.get(key)]
+                    if stage == "首销":
+                        candidates = [resolved.get(key), daily.get(key)]
+                    else:
+                        candidates = [daily.get(key)]
+                        if (model, current.isoformat()) in flat_daily:
+                            # Only use an edition's resolved flat-sales observations.
+                            candidates.append(resolved.get(key))
                     values_by_day.append(next((c for c in candidates if c is not None and c[0] is not None), None))
-                    current += timedelta(days=1)
                 valid_days = all(c is not None for c in values_by_day)
                 raw_week = weekly.get((model, period, field)) if whole or (stage == "平销" and not stage_split) else None
                 if stage == "平销" and raw_week is not None and raw_week[0] is not None:

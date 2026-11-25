@@ -312,20 +312,22 @@ def public_forecast_tables(book, data, emit, weekly_rows=(), as_of_date=None, ra
         for index, value in enumerate(item.get("daily_orders", [])):
             start = item.get("launch_date")
             day = {"day": f"D{index + 1}", "date": (date.fromisoformat(start) + timedelta(days=index)).isoformat() if start else None}
-            add(item.get("generation") or item["model"], item["model"], day, "首销", "历史首销",
+            model = _daily_event(item.get("generation") or item["model"], item.get("secondary_generation") or item["model"], targets)
+            add(model, item["model"], day, "首销", "历史首销",
                 {"file": history_file, "sheet": GROSS_DAILY_SHEET}, {"大定": value})
     small_records = []
     max_curve = max((len(r.get("standard_progress", [])) for r in data.get("small_order_history", [])), default=0)
     for item in data.get("small_order_history", []):
         if item.get("daily_actual"):
-            target = targets.get(item.get("generation") or item["model"], {})
+            model = _daily_event(item.get("generation") or item["model"], item.get("secondary_generation") or item["model"], targets)
+            target = targets.get(model, {})
             for i, value in enumerate(item.get("daily_orders", [])):
                 dates = item.get("dates", [])
                 observed = dates[i] if i < len(dates) else None
                 if (not target.get("small_start_date") or item.get("small_start_date") != target["small_start_date"]
                         or not observed or not target["small_start_date"] <= observed <= (target.get("small_end_date") or "")):
                     continue
-                add(item.get("generation") or item["model"], item["model"],
+                add(model, item["model"],
                     {"day": f"D{i+1}", "date": observed}, "小订", "历史小订",
                     {"file": history_file, "sheet": item.get("source_sheet")}, {"小订数量": value})
         curve = item.get("standard_progress", [])
@@ -436,9 +438,63 @@ def public_forecast_tables(book, data, emit, weekly_rows=(), as_of_date=None, ra
     book._sheets = [book[name] for name in first] + [s for s in book.worksheets if s.title not in first]
 
 
+def daily_stage_targets(data):
+    """Build daily order windows separately from the parent's flat-sales forecast horizon."""
+    launch = {r["name"]: r for r in data.get("targets", [])}
+    targets = {**launch, **{r["name"]: r for r in data.get("steady_targets", [])}}
+    editions = {}
+    for name, row in launch.items():
+        if row.get("secondary_generation") and row.get("primary_generation"):
+            targets[name] = row
+            editions.setdefault(row["primary_generation"], []).append(row)
+
+    # A maintained primary event can also be present only in history: the
+    # forecast selector suppresses parent options when launch editions exist.
+    primary_history = {r["model"]: r for r in data.get("history", [])
+                       if r.get("primary_generation") == r.get("model") and not r.get("secondary_generation")
+                       and r.get("launch_date") and r.get("end_date")}
+    for parent, children in editions.items():
+        primary = launch.get(parent) or primary_history.get(parent)
+        if primary and not primary.get("aggregate"):
+            targets[parent] = {**targets.get(parent, {}), **primary, "name": parent}
+            continue
+        if len(children) < 2:
+            continue
+        windows = sorted((calendar_day(r.get("launch_date")), calendar_day(r.get("end_date"))) for r in children)
+        complete = all(start and end and start <= end for start, end in windows)
+        targets[parent] = {**targets.get(parent, {}), "name": parent,
+                           "launch_date": windows[0][0] if complete else "",
+                           "end_date": max(end for _, end in windows) if complete else "",
+                           "_edition_launch_windows": windows if complete else ()}
+    return targets
+
+
+def daily_launch_stage(target, day):
+    """Classify a day for one identity, including gaps between sibling launches."""
+    day = iso_day(day)
+    start, end = target.get("launch_date"), target.get("end_date")
+    if not day or not start or not end:
+        return "阶段未知"
+    if day < start:
+        return "首销前"
+    if day > end:
+        return "平销"
+    windows = target.get("_edition_launch_windows")
+    return "首销" if not windows or any(first <= day <= last for first, last in windows) else "平销"
+
+
+def _daily_event(model, edition, targets):
+    """Accept a secondary identity only when it belongs to the supplied primary."""
+    campaign = targets.get(edition, {})
+    if campaign.get("secondary_generation") and campaign.get("primary_generation") == model:
+        return campaign["name"]
+    return model
+
+
 def resolved_daily_rows(candidates, data, masters, history_file, today, raw_profiles=None):
     """One model/date row, field-wise precedence, never sum overlapping sources."""
-    targets = {r["name"]: r for r in [*data.get("targets", []), *data.get("steady_targets", [])]}
+    targets = daily_stage_targets(data)
+    parents = {r.get("primary_generation") for r in targets.values() if r.get("secondary_generation")}
     references = data.get("reference_daily", {})
     cancel_cumulative = data.setdefault("resolved_cancel_cumulative", {})
     history_cancel_days = data["resolved_cancel_history_days"] = set()
@@ -483,7 +539,7 @@ def resolved_daily_rows(candidates, data, masters, history_file, today, raw_prof
                     "退订数量": daily_cancel, "来源类型": "小订退订",
                     "来源文件": filename, "来源Sheet": sheet, "_origins": {"退订数量": cancel_origin}})
     for item in data.get("history", []):
-        model = item.get("generation") or item["model"]
+        model = _daily_event(item.get("generation") or item["model"], item.get("secondary_generation") or item["model"], targets)
         start = item.get("launch_date")
         if not start:
             continue
@@ -513,7 +569,7 @@ def resolved_daily_rows(candidates, data, masters, history_file, today, raw_prof
             ORDER_FIELDS[field]: value, "来源类型": "选配实际", "来源文件": filename, "来源Sheet": sheet,
             "_origins": {ORDER_FIELDS[field]: source_text(source)}})
     rows, ranks, origins = {}, {}, {}
-    def rank_for(source, field, target, day):
+    def rank_for(source, field, target, day, stage):
         kind = source.get("来源类型")
         if field == "退订数量":
             if kind == "历史小订退订":
@@ -523,7 +579,9 @@ def resolved_daily_rows(candidates, data, masters, history_file, today, raw_prof
                 return 0 if not start or day < start else None
             if kind == "历史首销":
                 start, end = target.get("launch_date"), target.get("end_date")
-                return 0 if not start or (day >= start and (not end or day <= end)) else None
+                if start and end:
+                    return 0 if stage == "首销" else None
+                return 0 if not start or day >= start else None
             return 1 if kind == "小订退订" else None
         if field == "小订数量":
             start, end = target.get("small_start_date"), target.get("small_end_date")
@@ -537,9 +595,8 @@ def resolved_daily_rows(candidates, data, masters, history_file, today, raw_prof
             kind = source.get("_kinds", {}).get(field, "首销订单")
         if "选配比例" in str(source.get("来源文件")):
             kind = "选配实际"
-        start, end = target.get("launch_date"), target.get("end_date")
-        known = bool(start and end)
-        in_launch = bool(known and start <= day <= end)
+        known = stage != "阶段未知"
+        in_launch = stage == "首销"
         mix = kind in {"选配实际", "平销锁单", "无小订大定补缺"}
         if field in {"小转大", "直接大定"} and known and not in_launch:
             return None
@@ -556,18 +613,29 @@ def resolved_daily_rows(candidates, data, masters, history_file, today, raw_prof
         if not model or not calendar_day(day):
             continue
         day = day[:10]
+        historical = source.get("历史传播名")
+        edition = source.get("二级代际名")
+        if not edition and source.get("来源类型") in {"历史首销", "历史小订", "历史小订退订"}:
+            edition = historical  # These quantities were indexed by the named history row.
+        model = _daily_event(model, edition, targets)
+        if model in parents or targets.get(model, {}).get("secondary_generation"):
+            # Profile history_model is reference metadata. A parent-only source must
+            # stay a parent row even when it points at an edition for comparison.
+            historical = model
         key = (model, day)
         row = rows.setdefault(key, {"订单分析代际名": model, "日期": date_cell(day)})
-        for label in ("历史传播名", "生命周期"):
-            if source.get(label) and not row.get(label):
-                row[label] = source[label]
+        for label, value in (("历史传播名", historical), ("生命周期", source.get("生命周期"))):
+            if value and not row.get(label):
+                row[label] = value
+        target = targets.get(model, {})
+        stage = daily_launch_stage(target, day)
         for field in fields:
             if field in source:
                 row.setdefault(field, None)
             value = source.get(field)
             if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
                 continue
-            rank = rank_for(source, field, targets.get(model, {}), day)
+            rank = rank_for(source, field, target, day, stage)
             if rank is None:
                 continue
             identity = (*key, field)
@@ -584,7 +652,8 @@ def resolved_daily_rows(candidates, data, masters, history_file, today, raw_prof
     for key, row in sorted(rows.items()):
         model, day = key
         target = targets.get(model, {})
-        in_launch = bool(target.get("launch_date") and target.get("end_date") and target["launch_date"] <= day <= target["end_date"])
+        stage = daily_launch_stage(target, day)
+        in_launch = stage == "首销"
         if in_launch and row.get("大定") is None and all(row.get(field) is not None for field in ("小转大", "直接大定")):
             row["大定"] = row["小转大"] + row["直接大定"]
             origins.setdefault(key, {})["大定"] = "已选小转大+直接大定（日量相加）"
@@ -597,8 +666,7 @@ def resolved_daily_rows(candidates, data, masters, history_file, today, raw_prof
         if "小订数量" in row and (not small_start or not small_end or small_start <= day <= small_end):
             stages.append("小订")
         if any(row.get(c) is not None for c in ORDER_FIELDS.values()) or "退订数量" in row or (in_launch and any(c in row for c in ORDER_FIELDS.values())):
-            stages.append("阶段未知" if not target.get("launch_date") or not target.get("end_date") else
-                          "首销前" if day < target["launch_date"] else "首销" if in_launch else "平销")
+            stages.append(stage)
         row["订单阶段"] = "/".join(stages)
         row["日期状态"] = "已结束日" if day < today.isoformat() else "当日未结束" if day == today.isoformat() else "未来日期"
         if not stages:
@@ -631,7 +699,7 @@ def backfill_launch_cumulative(rows, ranks, origins, data, targets, profiles, to
         anchor_rows = {calendar_day(r.get("date")): r for r in profile.get("cumulative_days", [])}
         for key, field in ORDER_FIELDS.items():
             anchors = {calendar_day(r.get("date")): r[key] for r in profile.get("cumulative_days", [])
-                       if start <= calendar_day(r.get("date")) <= finish
+                       if daily_launch_stage(target, calendar_day(r.get("date"))) == "首销"
                        and isinstance(r.get(key), (int, float)) and not isinstance(r[key], bool)
                        and math.isfinite(r[key]) and r[key] >= 0}
             if not anchors:

@@ -10,13 +10,25 @@ from core.forecast_summary import GROSS_DAILY_SHEET
 
 LOGGER = logging.getLogger("sales_forecast_refresh")
 
+# Explicit launch boundaries outrank the historical conversion-end proxy.
+LAUNCH_END_HEADERS = ("首销期结束日期", "首销结束日期", "首销结束", "首销截止日期", "首销截止", "小转大结束日期")
+
+
+def launch_end_value(record: dict[str, Any]) -> Any:
+    for name in LAUNCH_END_HEADERS:
+        value = record.get(name)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 SUMMARY_HEADER_ALIASES = {
     "车型": {"传播名", "历史传播名", "车型", "车型名称", "历史车型", "车系车型", "代际名"},
     "留资": {"留资", "留资日期"},
     "小订开始日期": {"小订开始日期", "小订开始", "小订开启日期"},
     "小订结束日期": {"小订结束日期", "小订结束", "小订截止日期"},
     "开始大定日期": {"开始大定日期", "大定开始日期", "首销开始日期", "发布日", "上市日期"},
-    "小转大结束日期": {"小转大结束日期", "首销截止", "首销结束日期", "首销期结束日期"},
+    "小转大结束日期": set(LAUNCH_END_HEADERS),
     "小订天数": {"小订天数", "小订期天数"},
     "首销期天数": {"首销期天数", "首销天数", "首销周期天数"},
     "总小订": {"总小订", "小订总量", "累计小订", "总小订量"},

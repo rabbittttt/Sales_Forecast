@@ -15,6 +15,7 @@ from core.forecast_calendar import (
     _number, _positive_day_count, _small_order_stage, _weekday,
 )
 from core.china_calendar import calendar_payload
+from core.forecast_headers import launch_end_value
 from core.data_paths import forecast_summary_path, forecast_reference_directory, model_information_directory
 from core.model_identity import model_key, model_alias_keys, aggregate_generation_name, usable_attribute, stage_records, stage_name, parent_generation, stage_label, resolve_stage_identity, generation_records, has_reservation, FORECAST_SOURCE_PATH
 from core.excel import cell_source_text, join_source_texts, covered_date_source_text, _source_date_ranges, display_period, grain_from_sheet, is_aggregate_generation, parse_metric_sheet, sheet_subject, subject_type, compact_diagnostic_ranges
@@ -290,7 +291,7 @@ def _read_stage_windows() -> tuple[Path | None, dict[str, dict[str, Any]]]:
                 continue
             generation = model_mapping.get(_model_key(model), model)
             launch_date = _iso(_first_record_value(record, "开始大定日期", "首销开始日期", "首销开始", "发布日"))
-            end_date = _iso(_first_record_value(record, "小转大结束日期", "首销结束日期", "首销结束", "首销截止"))
+            end_date = _iso(launch_end_value(record))
             days = max(int(_number(_first_record_value(record, "首销期天数", "首销天数"), 0)), 0)
             start, finish = _as_date(launch_date), _as_date(end_date)
             if start and not finish and days > 0:
@@ -1006,7 +1007,7 @@ def _history_item(record: dict[str, Any], processed: bool) -> dict[str, Any]:
         "node": usable_attribute(record.get("发布类型") or record.get("发布节点")),
         "launch_weekday": str(record.get("发布星期") or _weekday(record.get("发布日") or record.get("开始大定日期"))),
         "launch_period": usable_attribute(record.get("首销发布时段")),
-        "end_date": _iso(record.get("首销结束日期") or record.get("首销截止") or record.get("小转大结束日期")),
+        "end_date": _iso(launch_end_value(record)),
         "days": int(_number(record.get("首销期天数") or record.get("首销天数"), 0)),
         "gross": int(_number(_first_record_value(record, gross_key, "大定量"))),
         "net": int(_number(_first_record_value(record, "首销期留存大定", "首销期净大定"))),
@@ -2445,7 +2446,7 @@ def _target_options(
         )
         launch_date = (window or {}).get("launch_date") or _iso(_first_record_value(master_record or {}, "首销开始", "开始大定日期", "发布日")) or profile.get("launch_date") or (reference["launch_date"] if reference else "")
         maintained_days = (window or {}).get("days") or _first_record_value(master_record or {}, "首销天数", "首销期天数") or (reference["days"] if reference else 0)
-        end_date = (window or {}).get("end_date") or _iso(_first_record_value(master_record or {}, "首销结束日期", "首销结束", "首销截止", "小转大结束日期")) or (reference.get("end_date") if reference else None)
+        end_date = (window or {}).get("end_date") or _iso(launch_end_value(master_record or {})) or (reference.get("end_date") if reference else None)
         _validate_stage_window(profile["model"], start=launch_date, end=end_date, kind="首销窗口")
         _validate_stage_window(profile["model"], start=(window or {}).get("small_start_date"), end=(window or {}).get("small_end_date"), kind="小订窗口")
         parsed_start, parsed_end = _as_date(launch_date), _as_date(end_date)
