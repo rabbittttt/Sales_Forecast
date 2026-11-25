@@ -646,7 +646,10 @@ body.forecast-app #forecastHeaderTools .forecast-target-tabs {
 #forecastHeaderTools .forecast-target-tabs button:focus-visible {
   outline:2px solid var(--primary); outline-offset:-2px;
 }
-.forecast-header-menu {grid-area:tools}
+.forecast-header-status {
+  grid-area:tools; display:flex; align-items:center; justify-content:flex-end; gap:8px;
+}
+.forecast-header-status .forecast-stage-status {color:var(--primary-strong); font-weight:600}
 .forecast-header-menu > summary {background:var(--surface-muted); list-style:none}
 .forecast-header-menu > summary::after {content:"▾"; padding-left:5px}
 .forecast-header-menu[open] > summary::after {content:"▴"}
@@ -675,7 +678,8 @@ body.forecast-app #forecastHeaderTools .forecast-target-tabs {
   body.forecast-app .topbar:has(> #forecastNavParameters) .filters {flex-wrap:wrap}
   body.forecast-app .topbar:has(> #forecastNavParameters) .filters label {max-width:100%}
   body.forecast-app .module-bar #moduleNav button {padding-inline:5px;gap:3px}
-  body.forecast-app .module-bar .forecast-header-menu {justify-self:end}
+  .forecast-header-status {flex-direction:column; align-items:flex-end; gap:0; max-inline-size:36vw}
+  .forecast-header-status .forecast-stage-status {line-height:1.2; text-align:end}
   #forecastHeaderTools .forecast-target-tabs button {padding:6px}
   .forecast-header-menu > summary .forecast-source-brief[data-warning=true] {font-size:0}
   .forecast-header-menu > summary .forecast-source-brief[data-warning=true]::after {content:"!"; font-size:12px}
@@ -691,4 +695,14 @@ body.forecast-app #forecastHeaderTools .forecast-target-tabs {
 }
 @media(max-width:760px){
   body.forecast-app .module-bar:has(.forecast-refresh-status) {grid-template-areas:"stage tools" "views reset" "time time"}
+}
+
+@media(max-width:320px){
+  body.forecast-app .module-bar:has(#forecastHeaderTools) {
+    grid-template-areas:"stage stage" "views reset" "tools tools";
+  }
+  .forecast-header-status {max-inline-size:none; flex-direction:row; align-items:center; justify-content:space-between}
+  body.forecast-app .module-bar:has(.forecast-refresh-status) {
+    grid-template-areas:"stage stage" "views reset" "tools tools" "time time";
+  }
 }

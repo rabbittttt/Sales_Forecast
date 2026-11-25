@@ -75,7 +75,10 @@
     toggle.textContent = '详情';
     toggle.append(sources.querySelector('[data-forecast-source-brief]'));
     sources.prepend(root.querySelector('[data-forecast-feedback]'));
-    meta.append(menu, sources.querySelector('[data-forecast-reset]'));
+    const statusArea = document.createElement('div');
+    statusArea.className = 'forecast-header-status';
+    statusArea.append(sources.querySelector('[data-forecast-current-day]'), menu);
+    meta.append(statusArea, sources.querySelector('[data-forecast-reset]'));
     menu.append(toggle, sources);
     host.append(meta);
     host.hidden = false;

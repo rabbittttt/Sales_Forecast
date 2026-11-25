@@ -33,6 +33,10 @@ async function checkLayout(page, frame, {singleCampaign}) {
     const wide = width >= 1280;
     await frame.waitForFunction(wide => document.querySelector('#forecastNavParameters').open === wide, wide);
     assert(await model.isVisible());
+    const currentDay = frame.locator('.forecast-header-status > [data-forecast-current-day]');
+    assert(await currentDay.isVisible(), 'Stage status should be visible with Details closed');
+    assert.equal(await frame.locator('.forecast-header-menu[open]').count(), 0);
+    assert.equal(await frame.locator('[data-forecast-current-day]').count(), 1);
     assert.equal(await frame.locator('#updatedAt').isVisible(), width > 1000);
     assert.equal(await frame.locator('#grainSelect').isVisible(), false);
     const period = frame.locator('#periodSelect');
@@ -88,6 +92,13 @@ async function checkLayout(page, frame, {singleCampaign}) {
   for (const stage of ['small','steady','launch']) {
     await frame.locator('[data-forecast-nav="'+stage+'"]').click();
     await frame.locator('[data-forecast-stage-pane="'+stage+'"].active').waitFor();
+    const currentDay = frame.locator('.forecast-header-status > [data-forecast-current-day]');
+    if (singleCampaign && stage === 'launch') {
+      await frame.waitForFunction(() => /D2\b/.test(document.querySelector('[data-forecast-current-day]').textContent));
+    }
+    const stageStatus = await frame.locator('.forecast-workspace.forecast-v2').getAttribute('data-forecast-status-'+stage);
+    assert(stageStatus);
+    assert.equal(await currentDay.textContent(), stageStatus);
     for (const view of ['evidence','score','result']) {
       const tab = frame.locator('#forecastHeaderTools [data-forecast-tab="'+view+'"]');
       await tab.click();
@@ -182,6 +193,15 @@ async function checkSharedImport(writer, reader) {
       await checkDiagnostic(writer);
       const reader = await openPortal(browser, server.origin, errors);
       await checkSharedImport(writer, reader);
+      // The fixture business date is Nov 14. Moving launch to Nov 2 makes today D13.
+      const days = writer.frame.locator('[data-forecast-target="days"]');
+      const launchDate = writer.frame.locator('[data-forecast-target="launchDate"]');
+      await days.fill('25');
+      await days.dispatchEvent('change');
+      await launchDate.fill('2026-11-02');
+      await launchDate.dispatchEvent('change');
+      await writer.frame.locator('.forecast-header-status > [data-forecast-current-day]').filter({hasText:/D13\b/}).waitFor();
+      assert.equal(await writer.frame.locator('.forecast-header-menu[open]').count(), 0);
       assert.deepEqual(errors, []);
       console.log('PASS embedded responsive navigation, keyboard focus, independent shared import and hidden iframe polling');
     } finally { await server.close(); }
