@@ -766,12 +766,14 @@ for(const length of [1,7,35,120]){
  const before=JSON.stringify(rows),known=rows.filter(row=>Number.isFinite(row.value));
  for(const launch of [false,true]){
   const html=renderForecastQuantityChart(rows,{valueKey:'value',launch}),box=html.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/),labels=[...html.matchAll(/<text data-forecast-quantity-label[^>]*>(.*?)<\/text>/g)];
-  assert.equal(Number(box[2]),220);assert.equal(labels.length,known.length);
+  assert.equal(Number(box[2]),320);assert.equal(labels.length,known.length);
   assert.deepEqual(labels.map(match=>match[1]),known.map(row=>fmt(row.value)));
   assert.equal((html.match(/<rect /g)||[]).length,known.length);
   assert([...html.matchAll(/<rect [^>]*width="([\d.]+)"/g)].every(match=>Number(match[1])<=18));
   assert(html.includes('tabindex="0" role="region"'));assert(html.includes('查看图表数值'));
-  if(length>12)assert(Number(box[1])>length*55,'wide quantity labels keep their own horizontal space');
+  const labelX=labels.map(match=>Number(match[0].match(/ x="([\d.]+)"/)[1]));
+  if(labelX.length>1)assert(labelX[1]-labelX[0]>=fmt(known[1].value).length*6.5 && labelX[1]-labelX[0]<=54,'days should sit close together without overlapping wide values');
+  assert.equal((html.match(/>D\d+<\/text>/g)||[]).length,length,'every day has an axis label');
  }
  const args={series:[{label:'actual',role:'actual',color:'#1677FF',values:rows.map(row=>row.value)},{label:'external',role:'reference',dashed:true,color:'#7C3AED',values:rows.map(row=>row.value)}],labels:rows.map(row=>row.date),ariaLabel:'external',unit:'number'};
  const compact=renderLifecycleLineChart({...args,compact:true});
@@ -782,7 +784,7 @@ for(const length of [1,7,35,120]){
  }
  assert.equal((compact.match(/data-forecast-external-label/g)||[]).length,known.length*2);
  assert.equal((compact.match(/<circle /g)||[]).length,known.length*2);
- assert(compact.includes('forecast-compact-line-scroll'));assert(compact.includes(' 220" role="img"'));
+ assert(compact.includes('forecast-compact-line-scroll'));assert(compact.includes(' 320" role="img"'));
  assert(compact.includes('stroke-dasharray="7 5"'));assert(compact.includes('0单'));
  assert(renderLifecycleLineChart(args).includes('viewBox="0 0 920 245"'),'reference evidence geometry must remain unchanged');
  assert.equal(JSON.stringify(rows),before,'display must not mutate forecast rows');

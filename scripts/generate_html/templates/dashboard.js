@@ -429,7 +429,7 @@
         if(result.record)datasets.set(name,result.record);else datasets.delete(name);
         revision=result.revision;
         if(undoRows.get(name)?.revision!==revision)undoRows.delete(name);
-        statusAll(result.record?'已载入共享预测，共'+result.record.rows.length+'条。':'当前车型尚无共享导入。','success');
+        statusAll(result.record?'已载入 '+result.record.rows.length+' 条共享预测':'','success');
         render();
       }catch{
         if(token===serial){readFailed=true;statusAll('共享导入暂时无法读取，请稍后重试。','error');}
@@ -464,7 +464,17 @@
     for(const [stage,[label,unit]] of Object.entries(stages)){
       const anchor=root.querySelector(`[data-forecast-import-anchor="${stage}"]`);if(!anchor)continue;
       const card=document.createElement('section');card.className='forecast-import';card.dataset.forecastImport=stage;
-      card.innerHTML='<div class="forecast-import-head"><div><small>预测曲线外部对照</small><h4>外部逐日预测 · '+label+'</h4></div><p>三个阶段共用导入：小订量、总大定分列；平销总大定按大定到锁单率换算。导入值独立展示，不覆盖真实订单或算法结果。</p></div><details class="forecast-import-manager"><summary>管理导入</summary><div class="forecast-import-actions"><label>导入方式<select data-forecast-import-mode aria-label="外部预测导入方式"><option value="merge">合并（同指标同日更新）</option><option value="replace">替换该车型全部外部预测</option></select></label><label>选择Excel/CSV<input type="file" accept=".xlsx,.csv" data-forecast-import-file aria-label="导入'+label+'逐日预测"></label><button type="button" data-forecast-import-template>下载CSV模板</button><button type="button" data-forecast-import-clear>清除该车型全部导入</button></div><p class="forecast-import-help">字段：车型（代际）、日期、预测小订、预测大定（总大定，不是留存大定）；数量可填非负小数，显示时四舍五入，可只填其中一列。一次导入供三个阶段使用；按各阶段日期展示，保留已过日期预测。</p></details><p role="status" aria-live="polite" data-forecast-import-status>'+(endpoint?'导入后对本服务所有用户可见。':'导入后保存到当前浏览器。')+'</p><div data-forecast-import-result></div>';
+      card.innerHTML=`<h4 class="forecast-import-head">外部逐日预测</h4>
+        <details class="forecast-import-manager"><summary>管理导入（${endpoint?'全员共享':'仅当前浏览器'}）</summary>
+          <div class="forecast-import-actions">
+            <label>导入方式<select data-forecast-import-mode aria-label="外部预测导入方式"><option value="merge">合并（同指标同日更新）</option><option value="replace">替换该车型全部外部预测</option></select></label>
+            <label>选择 Excel/CSV<input type="file" accept=".xlsx,.csv" data-forecast-import-file aria-label="导入${label}逐日预测"></label>
+            <button type="button" data-forecast-import-template>下载 CSV 模板</button>
+            <button type="button" data-forecast-import-clear>清除该车型全部导入</button>
+          </div>
+        </details>
+        <p role="status" aria-live="polite" data-forecast-import-status></p>
+        <div data-forecast-import-result></div>`;
       card.querySelector('.forecast-import-manager').open=!datasets.get(importName())?.rows.length;
       anchor.append(card);cards.push({stage,unit,card});
       const undo=document.createElement('button');undo.type='button';undo.dataset.forecastImportUndo='';undo.textContent='撤销清除';undo.hidden=true;
@@ -531,13 +541,14 @@
         const actualRows=context.actualRows(stage,target,actual).filter(row=>row.date<=today&&stageFor(row.date,target,stage)===stage);
         const actualMap=new Map(actualRows.filter(row=>Number.isFinite(row.value)&&row.value>=0).map(row=>[row.date,row.value]));
         const dates=[...new Set([...forecasts.keys(),...actualMap.keys()])].sort();
-        if(!notice.dataset.state&&imported){notice.dataset.state='success';notice.textContent='已恢复外部预测，共'+imported.rows.length+'条；三个阶段共享，按各自日期展示。';}
-        if(!dates.length){node.innerHTML='<p>当前阶段暂无实际或外部预测数据。</p>';continue;}
+        if(!notice.dataset.state&&imported){notice.dataset.state='success';notice.textContent='已载入 '+imported.rows.length+' 条本地预测';}
+        if(!dates.length){node.innerHTML='<p>本阶段暂无逐日数据</p>';continue;}
         const values=dates.map(date=>forecasts.get(date)?.value??null),known=values.filter(Number.isFinite),total=known.reduce((a,b)=>a+b,0);
-        const rateNote=stage==='steady'?(validRate?'外部预测锁单＝导入总大定 × '+(lockRate*100).toFixed(1)+'%（当前首销预测参数“大定到锁单率”，可人工调整；非留存大定率）。':'大定到锁单率缺失或无效，暂不能换算；已保留导入总大定。'):'导入值独立展示，不覆盖实际或系统预测。';
-        node.innerHTML='<p><b>外部预测合计：'+(known.length?fmt(Math.round(total)):'—')+' 单（'+unit+'）</b>；'+esc(rateNote)+'</p>'+renderLifecycleLineChart({
-          series:[{label:'实际'+unit+'（当天如有则为未完日快照）',values:dates.map(date=>actualMap.get(date)??null),color:'#2859f5',role:'actual'},{label:'外部预测（'+unit+'）',values:values.map(v=>v==null?null:Math.round(v)),color:'#7C3AED',role:'reference',dashed:true}],
-          labels:dates,unit:'number',compact:true,title:stages[stage][0]+'实际与外部逐日预测',ariaLabel:stages[stage][0]+'外部逐日预测折线图',note:'仅展示本阶段日期。已过日期的导入预测保留；缺失留空，不补零；当日实际尚未结束。'
+        const showRate=stage==='steady'&&rows.some(row=>metricOf(row)==='gross');
+        const rateNote=showRate?(validRate?'锁单预测 = 总大定 × '+(lockRate*100).toFixed(1)+'%':'锁单率缺失或无效，无法换算'):'';
+        node.innerHTML='<p><b>外部预测合计：'+(known.length?fmt(Math.round(total)):'—')+' 单（'+unit+'）</b>'+(rateNote?' · '+esc(rateNote):'')+'</p>'+renderLifecycleLineChart({
+          series:[{label:'实际'+unit+(actualMap.has(today)?'（今日未结束）':''),values:dates.map(date=>actualMap.get(date)??null),color:'#2859f5',role:'actual'},{label:'外部预测',values:values.map(v=>v==null?null:Math.round(v)),color:'#7C3AED',role:'reference',dashed:true}],
+          labels:dates,unit:'number',compact:true,table:false,readoutHint:'',ariaLabel:stages[stage][0]+'外部逐日预测折线图'
         })+'<details><summary>查看逐日预测</summary><div class="forecast-score-table"><table><thead><tr><th>日期</th><th>实际'+unit+'</th><th>外部预测'+unit+'</th>'+(stage==='steady'?'<th>导入总大定</th>':'')+'<th>来源文件</th></tr></thead><tbody>'+dates.map(date=>'<tr><td>'+esc(date)+(date===today?'（当日未结束）':'')+'</td><td>'+fmt(actualMap.get(date)??null)+'</td><td>'+displayCount(forecasts.get(date)?.value)+'</td>'+(stage==='steady'?'<td>'+displayCount(metricOf(forecasts.get(date)||{})==='gross'?forecasts.get(date)?.quantity:null)+'</td>':'')+'<td>'+esc(forecasts.get(date)?.source||'')+'</td></tr>').join('')+'</tbody></table></div></details>';
       }
     }
@@ -1058,11 +1069,11 @@
   function renderForecastQuantityChart(rows,{valueKey,labelKey='label',metric='销量',method='parameter',launch=false}={}){
     if(!rows.length)return '<div class="empty-image">暂无可绘制数据</div>';
     const known=value=>typeof value==='number'&&Number.isFinite(value),values=rows.map(row=>row[valueKey]),showDaily=launch&&valueKey!=='daily_gross';
-    const spacing=Math.max(42,...values.filter(known).map(value=>fmt(value).length*6.5+16));
-    const H=220,left=60,right=launch?50:24,top=26,bottom=42,W=Math.max(560,rows.length*spacing+left+right),plotW=W-left-right,plotH=H-top-bottom,max=Math.max(...values.filter(known),1)*1.12;
-    const x=i=>left+(i+.5)*plotW/rows.length,y=value=>top+plotH*(1-value/max),rateY=value=>top+plotH*(1-Math.min(Math.max(value,0),1)),barW=Math.max(6,Math.min(18,plotW/rows.length*.45));
-    const stateLabel=row=>row.missing?'数据缺失':row.actual?'真实':row.past_missing?'历史缺失估算':row.partial?'分时滚动':row.current_estimate?'当日估算':'预测',futureColor=method==='progress'?'#0D9488':'#D97706';
     const label=row=>String(row[labelKey]||row.date||''),shortLabel=row=>label(row).split('（')[0];
+    const spacing=Math.max(30,...rows.map(row=>shortLabel(row).length*6+6),...values.filter(known).map(value=>fmt(value).length*6.5+8));
+    const H=320,left=60,right=launch?50:24,top=26,bottom=42,plotW=Math.max(100,rows.length*spacing),W=left+plotW+right,plotH=H-top-bottom,max=Math.max(...values.filter(known),1)*1.12;
+    const x=i=>left+plotW/2+(i-(rows.length-1)/2)*spacing,y=value=>top+plotH*(1-value/max),rateY=value=>top+plotH*(1-Math.min(Math.max(value,0),1)),barW=Math.min(18,spacing*.45);
+    const stateLabel=row=>row.missing?'数据缺失':row.actual?'真实':row.past_missing?'历史缺失估算':row.partial?'分时滚动':row.current_estimate?'当日估算':'预测',futureColor=method==='progress'?'#0D9488':'#D97706';
     const grid=[0,.25,.5,.75,1].map(rate=>{const gy=top+plotH*(1-rate);return `<line x1="${left}" y1="${gy}" x2="${W-right}" y2="${gy}" stroke="#E5EAF0"/><text x="${left-9}" y="${gy+4}" text-anchor="end" font-size="10" fill="#64748B">${fmt(Math.round(max*rate))}</text>${launch?`<text x="${W-right+9}" y="${gy+4}" font-size="10" fill="#64748B">${Math.round(rate*100)}%</text>`:''}`}).join('');
     const bars=rows.map((row,index)=>{const value=values[index];if(!known(value))return '';const actual=!!row.actual,color=actual?'#3979CB':futureColor;return `<rect x="${x(index)-barW/2}" y="${y(value)}" width="${barW}" height="${Math.max(top+plotH-y(value),0)}" rx="2" fill="${actual?color:'#FFF7ED'}" stroke="${color}" ${actual?'':'stroke-dasharray="4 2"'}><title>${esc(label(row))} ${esc(row.date||'')} · ${stateLabel(row)} · ${esc(metric)} ${fmt(value)}${showDaily?` · 当日大定 ${fmt(row.daily_gross)}`:''}</title></rect><text data-forecast-quantity-label x="${x(index)}" y="${Math.max(y(value)-7,12)}" text-anchor="middle" font-size="11" fill="#334155" stroke="#fff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">${fmt(value)}</text>`}).join('');
     const rateFields=launch?[['small_conversion','累计小转大率','#2563EB'],['direct_share','累计直接大定占比','#BE4B53']]:[];
@@ -1072,7 +1083,7 @@
       const dots=rows.map((row,i)=>known(row[field])&&(i===rows.length-1||row.cut||(i+1)%7===0)?`<circle cx="${x(i)}" cy="${rateY(row[field])}" r="3" fill="white" stroke="${color}"><title>${esc(label(row))} · ${title} ${(row[field]*100).toFixed(1)}%</title></circle>`:'').join('');
       return paths+dots;
     }).join('');
-    const tickStep=Math.max(1,Math.ceil(rows.length/10)),ticks=rows.map((row,i)=>i===0||i===rows.length-1||i%tickStep===0?`<text x="${x(i)}" y="${H-25}" text-anchor="middle" font-size="10" fill="#64748B">${esc(shortLabel(row))}</text><text x="${x(i)}" y="${H-10}" text-anchor="middle" font-size="9" fill="#64748B">${esc(row.day_type_short||'')}</text>`:'').join('');
+    const ticks=rows.map((row,i)=>`<text x="${x(i)}" y="${H-25}" text-anchor="middle" font-size="10" fill="#64748B">${esc(shortLabel(row))}</text><text x="${x(i)}" y="${H-10}" text-anchor="middle" font-size="9" fill="#64748B">${esc(row.day_type_short||'')}</text>`).join('');
     const legend=`<div class="legend forecast-chart-legend"><span><i style="background:#3979CB"></i>真实${esc(metric)}</span><span><i class="forecast-outline-key" style="border-color:${futureColor};background:#FFF7ED"></i>估算／预测${esc(metric)}</span>${rateFields.map(([,title,color])=>`<span><i class="line-key" style="border-color:${color}"></i>${title}</span>`).join('')}<span class="forecast-chart-key-note">实心为真实，虚线为估算／预测</span></div>`;
     const table=`<details class="forecast-ref-score-details forecast-result-values"><summary>查看图表数值</summary><div class="forecast-score-table"><table><thead><tr><th scope="col">周期／日期</th><th scope="col">状态</th><th scope="col">${esc(metric)}（单）</th>${showDaily?'<th scope="col">当日大定（单）</th>':''}${rateFields.map(([,title])=>`<th scope="col">${title}</th>`).join('')}</tr></thead><tbody>${rows.map((row,i)=>`<tr><th scope="row">${esc(label(row))}${row.date?` · ${esc(row.date)}`:''}</th><td>${stateLabel(row)}</td><td>${known(values[i])?fmt(values[i]):'—'}</td>${showDaily?`<td>${known(row.daily_gross)?fmt(row.daily_gross):'—'}</td>`:''}${rateFields.map(([field])=>`<td>${known(row[field])?(row[field]*100).toFixed(1)+'%':'—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
     return `<div class="forecast-svg-scroll forecast-result-chart-scroll" style="--forecast-chart-width:${W}px" tabindex="0" role="region" aria-label="${esc(metric)}图表，可横向滚动"><svg class="forecast-decision-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(metric)}实际与预测，实心为真实、虚线为估算或预测">${grid}${bars}${lines}${ticks}</svg></div>${legend}${table}`;
@@ -1143,12 +1154,15 @@
   function renderLifecycleBars(rows,valueKey,labelKey='label'){
     return renderForecastQuantityChart(rows,{valueKey,labelKey,metric:valueKey==='lock'?'周交车锁单':'当日小订'});
   }
-  function renderForecastEvidenceLines({series,labels,ariaLabel,title='',note='',unit='rate',slope=false,hourly=false,extra='',lifecycle=false,table=false,rangeMax=null,ratePrecision=null,compact=false,empty='暂无可比较曲线'}){
+  function renderForecastEvidenceLines({series,labels,ariaLabel,title='',note='',unit='rate',slope=false,hourly=false,extra='',lifecycle=false,table=false,rangeMax=null,ratePrecision=null,compact=false,readoutHint='横向滚动查看完整曲线；键盘 Tab 进入，← → 查看数值，Tab 离开。',empty='暂无可比较曲线'}){
     const heading=title||note?`<div class="forecast-task-chart-title"><strong>${esc(title)}</strong>${note?`<details class="forecast-chart-notes"><summary>${note.includes('拉伸')?'周期对齐与拉伸说明':'口径与曲线说明'}</summary><p>${esc(note)}</p></details>`:''}</div>`:'';
     const usable=series.filter(item=>(item.values||[]).some(Number.isFinite));if(!usable.length||!labels.length)return `${heading}<div class="empty-image">${esc(empty)}</div>`;
     const format=value=>unit==='rate'?`${(value*100).toFixed(ratePrecision??(value<.1?1:0))}%`:Math.round(value).toLocaleString('zh-CN')+(lifecycle?'单':'');
-    const finiteValues=usable.flatMap(item=>item.values.filter(Number.isFinite)),spacing=compact?Math.max(48,...finiteValues.map(value=>format(value).length*6.5+16)):0;
-    const maxPoints=Math.max(labels.length,...usable.map(item=>item.values.length),1),left=compact?Math.max(60,spacing/2+8):48,right=compact?Math.max(40,spacing/2+8):20,inset=compact?spacing/2+8:0,W=compact?Math.max(560,(maxPoints-1)*spacing+left+right+2*inset):920,H=compact?220:245,top=30,bottom=42,plotW=W-left-right,plotH=H-top-bottom,rawMax=Math.max(...finiteValues,1),yMax=Number.isFinite(rangeMax)&&rangeMax>0?rangeMax:unit==='rate'?Math.max(rawMax,1):rawMax*1.12,yMin=slope?Math.min(...finiteValues,0):0;
+    const sameYear=compact&&labels.every(date=>/^\d{4}-\d{2}-\d{2}$/.test(date)&&date.slice(0,4)===labels[0].slice(0,4));
+    const axisLabels=sameYear?labels.map(date=>date.slice(5)):labels;
+    const finiteValues=usable.flatMap(item=>item.values.filter(Number.isFinite));
+    const spacing=compact?Math.max(32,...axisLabels.map(label=>String(label).length*5.5+6),...finiteValues.map(value=>format(value).length*6.5+10)):0;
+    const maxPoints=Math.max(labels.length,...usable.map(item=>item.values.length),1),left=compact?60:48,right=compact?32:20,inset=compact?spacing/2+4:0,W=compact?(maxPoints-1)*spacing+left+right+2*inset:920,H=compact?320:245,top=30,bottom=42,plotW=W-left-right,plotH=H-top-bottom,rawMax=Math.max(...finiteValues,1),yMax=Number.isFinite(rangeMax)&&rangeMax>0?rangeMax:unit==='rate'?Math.max(rawMax,1):rawMax*1.12,yMin=slope?Math.min(...finiteValues,0):0;
     const x=index=>left+inset+(maxPoints===1?(compact?0.5:0):index/(maxPoints-1))*(plotW-2*inset),y=value=>top+plotH*(1-Math.min(Math.max((value-yMin)/(yMax-yMin),0),1));
     const grid=[0,.25,.5,.75,1].map(rate=>{const gy=top+plotH*(1-rate);return `<line x1="${left}" y1="${gy}" x2="${W-right}" y2="${gy}" stroke="#E8F0F7"/><text x="${left-8}" y="${gy+4}" text-anchor="end" font-size="9" fill="#7890A6">${format(yMin+(yMax-yMin)*rate)}</text>`}).join('');
     const placedLabels=new Map(),placeLabel=(index,preferred)=>{const occupied=placedLabels.get(index)||[],start=Math.min(Math.max(preferred,12),H-bottom+13),candidates=[0,-14,14,-28,28,-42,42,-56,56,-70,70].map(delta=>start+delta),chosen=candidates.find(value=>value>=12&&value<=H-bottom+13&&occupied.every(other=>Math.abs(value-other)>=12))??start;occupied.push(chosen);placedLabels.set(index,occupied);return chosen;};
@@ -1158,13 +1172,13 @@
       const step=curve.role==='reference'?(hourly?8:14):(hourly?4:7),dots=indexes.map((index,position)=>{const value=curve.values[index],show=compact||(curve.role!=='reference'||curve.core?position===0||position===indexes.length-1||(index+1)%step===0:false),offset=curve.role==='actual'?-10:curve.role==='forecast'?15:seriesIndex%2?-19:25,labelY=show?placeLabel(index,y(value)+offset):0,tooltip=`${curve.name} · ${labels[index]||''} · ${format(value)}`;return `<circle cx="${x(index)}" cy="${y(value)}" r="${show?(curve.role==='reference'?2.2:3):2}" fill="#fff" stroke="${curve.color}" stroke-width="${curve.role==='reference'?1.5:2}" tabindex="${seriesIndex===0&&position===0?0:-1}" role="img" aria-label="${esc(tooltip)}"><title>${esc(tooltip)}</title></circle>${show?`<text${compact?' data-forecast-external-label':''} x="${x(index)}" y="${labelY}" text-anchor="middle" font-size="${compact?11:9.5}" font-weight="700" fill="${curve.color}">${format(value)}</text>`:''}`}).join('');
       return segments.map(points=>`<polyline points="${points.join(' ')}" fill="none" stroke="${curve.color}" stroke-width="${curve.role==='reference'?(curve.core?2.2:1.35):3}" opacity="${curve.role==='reference'&&!curve.core?'.62':'1'}" ${curve.dash?`stroke-dasharray="${curve.dash}"`:''}><title>${esc(curve.name)}</title></polyline>`).join('')+dots;
     }).join('');
-    const tickCount=Math.min(maxPoints,8),ticks=Array.from({length:tickCount},(_,slot)=>{const index=Math.round(slot*(maxPoints-1)/Math.max(tickCount-1,1));return `<text x="${x(index)}" y="${H-15}" text-anchor="middle" font-size="9" fill="#7890A6">${esc(labels[index]||'')}</text>`}).join('');
+    const tickCount=compact?maxPoints:Math.min(maxPoints,8),ticks=Array.from({length:tickCount},(_,slot)=>{const index=Math.round(slot*(maxPoints-1)/Math.max(tickCount-1,1));return `<text x="${x(index)}" y="${H-15}" text-anchor="middle" font-size="9" fill="#7890A6">${esc(axisLabels[index]||'')}</text>`}).join('');
     const legend=usable.map(curve=>{const lastIndex=curve.values.reduce((found,value,index)=>Number.isFinite(value)?index:found,-1),latest=lastIndex>=0?format(curve.values[lastIndex]):'—';return `<span><i class="line-key${curve.dash?' dotted':''}" style="border-color:${curve.color}"></i>${esc(curve.name)} · 最新${latest}</span>`}).join('');
     const valuesTable=table?`<details class="forecast-ref-score-details"><summary>查看图表数值</summary><div class="forecast-score-table"><table><thead><tr><th scope="col">车型／曲线</th>${labels.map(label=>`<th scope="col">${esc(label)}</th>`).join('')}</tr></thead><tbody>${usable.map(curve=>`<tr><th scope="row">${esc(curve.name)}</th>${labels.map((_,index)=>`<td>${Number.isFinite(curve.values[index])?format(curve.values[index]):'—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`:'';
-    return `${heading}<div class="forecast-svg-scroll forecast-evidence-line-scroll${lifecycle?' forecast-lifecycle-line-scroll':''}${compact?' forecast-compact-line-scroll':''}"${compact?` style="--forecast-chart-width:${W}px"`:''}><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(ariaLabel)}">${grid}${lines}${ticks}</svg></div><p class="forecast-chart-readout" data-chart-readout role="status" aria-live="polite">横向滚动查看完整曲线；键盘 Tab 进入，← → 查看数值，Tab 离开。</p><div class="legend forecast-task-legend${lifecycle?' forecast-lifecycle-line-legend':''}">${legend}</div>${extra}${valuesTable}`;
+    return `${heading}<div class="forecast-svg-scroll forecast-evidence-line-scroll${lifecycle?' forecast-lifecycle-line-scroll':''}${compact?' forecast-compact-line-scroll':''}"${compact?` style="--forecast-chart-width:${W}px"`:''}><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(ariaLabel)}">${grid}${lines}${ticks}</svg></div><p class="forecast-chart-readout" data-chart-readout role="status" aria-live="polite">${esc(readoutHint)}</p><div class="legend forecast-task-legend${lifecycle?' forecast-lifecycle-line-legend':''}">${legend}</div>${extra}${valuesTable}`;
   }
-  function renderLifecycleLineChart({series,labels,ariaLabel,unit='percent',hourly=false,slope=false,title='',note='',compact=false,empty='暂无可比较曲线'}){
-    return renderForecastEvidenceLines({series:series.map(item=>({...item,name:item.label,role:item.role||'reference',core:true,dash:item.dashed?'7 5':''})),labels,ariaLabel,unit:unit==='percent'?'rate':'number',hourly,slope,title,note,lifecycle:true,table:true,compact,empty});
+  function renderLifecycleLineChart({series,labels,ariaLabel,unit='percent',hourly=false,slope=false,title='',note='',compact=false,table=true,readoutHint,empty='暂无可比较曲线'}){
+    return renderForecastEvidenceLines({series:series.map(item=>({...item,name:item.label,role:item.role||'reference',core:true,dash:item.dashed?'7 5':''})),labels,ariaLabel,unit:unit==='percent'?'rate':'number',hourly,slope,title,note,lifecycle:true,table,compact,readoutHint,empty});
   }
   function compactForecastScorePage(container){
     container.querySelectorAll('.forecast-score-page').forEach(page=>{

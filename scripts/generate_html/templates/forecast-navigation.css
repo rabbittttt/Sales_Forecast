@@ -628,7 +628,7 @@
 .forecast-workspace.forecast-studio .forecast-result-chart-scroll,
 .forecast-workspace.forecast-studio .forecast-compact-line-scroll{max-width:100%;overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:0;overscroll-behavior-x:contain}
 .forecast-workspace.forecast-studio .forecast-result-chart-scroll .forecast-decision-svg,
-.forecast-workspace.forecast-studio .forecast-compact-line-scroll svg{width:var(--forecast-chart-width);min-width:0;max-width:none;height:220px;aspect-ratio:auto;margin-inline:auto}
+.forecast-workspace.forecast-studio .forecast-compact-line-scroll svg{width:var(--forecast-chart-width);min-width:0;max-width:none;height:auto;aspect-ratio:auto;margin-inline:auto}
 .forecast-workspace.forecast-studio .forecast-result-chart-scroll:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
 .forecast-workspace.forecast-studio .forecast-chart-legend{justify-content:flex-start;gap:6px 16px;padding:6px 0;margin:0;font-size:var(--type-note);color:var(--ink-2)}
 .forecast-workspace.forecast-studio .forecast-chart-legend .forecast-outline-key{width:10px;height:8px;border:2px dashed;border-radius:2px}
@@ -745,9 +745,9 @@
 .forecast-workspace.forecast-studio .forecast-ref-card:has(>.forecast-ref-score-details[open])>.forecast-ref-actions{grid-row:4;grid-column:1/-1}
 .forecast-workspace.forecast-studio .forecast-import{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
 .forecast-workspace.forecast-studio .forecast-import-head{grid-column:1;grid-row:1;min-width:0}
-.forecast-workspace.forecast-studio .forecast-import-head p{max-width:520px}
-.forecast-workspace.forecast-studio [data-forecast-import-result]{grid-column:1/-1;grid-row:4;min-width:0}
-.forecast-workspace.forecast-studio [data-forecast-import-status]{grid-column:1/-1;grid-row:3}
+.forecast-workspace.forecast-studio [data-forecast-import-result]{grid-column:1/-1;min-width:0}
+.forecast-workspace.forecast-studio [data-forecast-import-status]{grid-column:1/-1}
+.forecast-import [data-forecast-import-status]:empty,.forecast-import [data-chart-readout]:empty{display:none}
 .forecast-workspace.forecast-studio .forecast-import-manager{grid-column:2;grid-row:1;margin:0;align-self:start}
 .forecast-workspace.forecast-studio .forecast-import-manager[open]{grid-column:1/-1;grid-row:2;border-top:1px solid var(--line);padding-top:8px}
 .forecast-workspace.forecast-studio .forecast-import-manager>summary{width:max-content;max-width:100%;min-height:32px;padding:5px 10px;border:1px solid var(--line-strong);border-radius:8px;color:var(--primary-strong);background:var(--page);cursor:pointer}

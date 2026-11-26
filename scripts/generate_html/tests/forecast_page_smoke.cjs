@@ -21,7 +21,7 @@ async function openPortal(browser, origin, errors) {
   const frame = page.frames().find(f => f.url().startsWith(origin + '/forecast/'));
   assert(frame, 'Expected the forecast page in the portal iframe.');
   await frame.locator('[data-forecast-nav="launch"][aria-current="page"]').waitFor();
-  await frame.locator('[data-forecast-import="launch"] [data-forecast-import-status]').filter({hasText:'尚无共享导入'}).waitFor();
+  await frame.locator('[data-forecast-import="launch"] [data-forecast-import-status][data-state=success]').waitFor({state:'attached'});
   return {context, page, frame};
 }
 
@@ -103,6 +103,12 @@ async function checkLayout(page, frame, {singleCampaign}) {
       const tab = frame.locator('#forecastHeaderTools [data-forecast-tab="'+view+'"]');
       await tab.click();
       assert.equal(await tab.getAttribute('aria-selected'), 'true');
+      if (view === 'result') {
+        for (const svg of await frame.locator('.forecast-result-chart-scroll svg:visible').all()) {
+          const height = await svg.evaluate(el => el.getBoundingClientRect().height);
+          assert(Math.abs(height-320) < 1, stage+' result chart height '+height);
+        }
+      }
       if (view === 'score') {
         const scores = frame.locator('.forecast-score-page:visible');
         await scores.first().waitFor();
@@ -148,12 +154,33 @@ async function checkSharedImport(writer, reader) {
   if (!await manager.evaluate(n => n.open)) await manager.locator('summary').click();
   const upload = writer.page.waitForRequest(req => req.method() === 'POST' && req.url().includes('/api/imports?'));
   await panel.locator('[data-forecast-import-file]').setInputFiles({
-    name:'fixture.csv', mimeType:'text/csv', buffer:Buffer.from('车型（代际）,日期,预测大定\n测试车型 A,2026-11-14,123.5\n'),
+    name:'fixture.csv', mimeType:'text/csv', buffer:Buffer.from('车型（代际）,日期,预测大定\n测试车型 A,2026-11-14,123.5\n测试车型 A,2026-11-15,100\n测试车型 A,2026-11-16,200\n'),
   });
   const post = await upload;
   await panel.locator('[data-forecast-import-status]').filter({hasText:'已共享'}).waitFor();
   const stored = await (await writer.page.request.get(post.url())).json();
   assert.equal(stored.record.rows[0].quantity, 123.5);
+  assert.equal(await panel.locator('[data-forecast-import-result] table').count(), 1);
+  const chart = panel.locator('.forecast-compact-line-scroll svg');
+  for (const width of [390,1440]) {
+    await writer.page.setViewportSize({width,height:900});
+    const geometry = await chart.evaluate(el => {
+      const dates = [...el.querySelectorAll('text')].filter(t => /^11-1[45]$/.test(t.textContent));
+      return {height:el.getBoundingClientRect().height, dates:dates.map(t => {
+        const {left,right}=t.getBoundingClientRect();
+        return {left,right};
+      })};
+    });
+    assert.equal(geometry.height, 320);
+    assert.equal(geometry.dates.length, 2);
+    const [first,second] = geometry.dates;
+    assert(second.left > first.right && second.left-first.left <= 40, JSON.stringify(geometry));
+  }
+  const rate = writer.frame.locator('[data-forecast-input="lock"]');
+  await rate.evaluate(input => {input.value='75';input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await writer.frame.waitForFunction(() =>
+    [...document.querySelectorAll('[data-forecast-import="steady"] tbody tr')].some(tr =>
+      tr.cells[2].textContent==='150' && tr.cells[3].textContent==='200' && tr.cells[4].textContent==='fixture.csv'));
   // Permit the hide observer to settle, then exercise two complete poll intervals.
   await new Promise(resolve => setTimeout(resolve, 300));
   const hiddenStart = requests;

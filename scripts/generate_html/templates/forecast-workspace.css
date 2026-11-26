@@ -1231,10 +1231,8 @@
 
 /* External forecast comparison stays distinct from computed/actual results. */
 .forecast-workspace.forecast-v2 .forecast-import{min-height:0;margin-top:12px;padding:12px 13px;border:1px solid #D8E7F5;border-radius:11px;background:#FAFDFF;line-height:1.55}
-.forecast-import-head{display:flex;align-items:start;justify-content:space-between;gap:12px}
-.forecast-import-head small{color:#7890A6;font-size:var(--type-note)}.forecast-import h4{margin:2px 0 0;color:#183552;font-size:14px}
+.forecast-import h4{margin:2px 0 0;color:#183552;font-size:14px}
 .forecast-import p{margin:7px 0;color:#50677f;font-size:var(--type-note);overflow-wrap:anywhere}
-.forecast-import-head>p{max-width:620px;margin:0;text-align:right}
 .forecast-import-scope{display:flex;align-items:center;gap:14px;margin:9px 0 5px;padding:0;border:0}
 .forecast-import-scope legend{float:left;margin-right:12px;color:#315A7D;font-size:var(--type-note);font-weight:700}
 .forecast-import-scope label{display:inline-flex;align-items:center;gap:5px;min-height:32px;color:#50677F;font-size:var(--type-note);cursor:pointer}
@@ -1245,6 +1243,6 @@
 .forecast-import-actions select{min-height:40px;min-width:0;max-width:100%;padding:7px 9px;border:1px solid #9cc8f8;border-radius:8px;background:#fff;color:#16466c;font:12px "Microsoft YaHei",sans-serif;box-sizing:border-box}
 .forecast-import button,.forecast-import input::file-selector-button{min-height:40px;margin:0;padding:7px 11px;border:1px solid #9cc8f8;border-radius:8px;background:#eef7ff;color:#0965d5;font:600 10px "Microsoft YaHei",sans-serif;cursor:pointer}
 .forecast-import button:focus-visible,.forecast-import input:focus-visible,.forecast-import select:focus-visible,.forecast-import summary:focus-visible{outline:2px solid #1677ff;outline-offset:3px}
-.forecast-import .forecast-import-help{margin:5px 0 0;color:#7890A6}.forecast-import summary{cursor:pointer;color:#0965d5;font-size:var(--type-note)}
+.forecast-import summary{cursor:pointer;color:#0965d5;font-size:var(--type-note)}
 .forecast-import .forecast-score-table{max-height:400px;overflow:auto}
-@media(max-width:680px){.forecast-import-head{flex-direction:column}.forecast-import-head>p{text-align:left}.forecast-import-scope{align-items:flex-start;flex-direction:column;gap:2px}.forecast-import-scope legend{float:none;margin:0}.forecast-import-actions{align-items:stretch;flex-direction:column}.forecast-import-actions button{width:100%}.forecast-import-actions select{min-height:44px}}
+@media(max-width:680px){.forecast-import-scope{align-items:flex-start;flex-direction:column;gap:2px}.forecast-import-scope legend{float:none;margin:0}.forecast-import-actions{align-items:stretch;flex-direction:column}.forecast-import-actions button{width:100%}.forecast-import-actions select{min-height:44px}}
