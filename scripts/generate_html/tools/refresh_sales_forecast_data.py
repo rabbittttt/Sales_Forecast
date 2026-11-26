@@ -38,6 +38,7 @@ from core.model_identity import model_key, usable_attribute, stage_records, stag
 from core.forecast_summary import SUMMARY_NAME, INDEX_SHEET, GUIDE_SHEET, DAILY_SHEET, WEEKLY_SHEET, D12_SHEET, D12_HEADERS, public_forecast_tables, summary_scope, summary_quality, table_records, iso_day
 from core.forecast_summary import GROSS_DAILY_SHEET, GROSS_PROGRESS_SHEET, LAUNCH_CANCEL_SHEET, LAUNCH_CANCEL_DAILY_SHEET, SMALL_CANCEL_SHEET, SMALL_CANCEL_DAILY_SHEET
 from core.excel import WorkbookItem, _source_date_range, grain_from_sheet, load_data_workbook, compact_diagnostic_ranges, reset_conflict_diagnostics
+from core.campaign_source import campaign_batch, edition_signature, is_edition, open_source, preferred_source
 from core.data_paths import (orders_input_directory, model_information_directory,
                              forecast_summary_path, excel_cache_directory, assert_output_is_private,
                              assert_summary_output)
@@ -55,6 +56,7 @@ LEGACY_MAPPINGS = (
 )
 REFRESH_CODE_DEPENDENCIES = (
     Path(__file__).resolve(),
+    GENERATE_HTML_ROOT / "core" / "campaign_source.py",
     GENERATE_HTML_ROOT / "core" / "model_identity.py",
     GENERATE_HTML_ROOT / "core" / "data_paths.py",
     GENERATE_HTML_ROOT / "core" / "forecast_summary.py",
@@ -305,7 +307,7 @@ def load_mapping(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, set[s
         if len(mapping) != len(modern):
             raise InputFormatError("代际名＋二级代际名重复，请核对整理表首个Sheet")
         return mapping, {k: {k} for k in mapping}
-    workbook = load_workbook(path, read_only=True, data_only=True)
+    workbook = open_source(path, read_only=True, data_only=True)
     try:
         mapping_sheet = next((name for name in ("车型基本信息", "传播名代际映射", "车型代际映射") if name in workbook.sheetnames), "")
         if not mapping_sheet:
@@ -416,7 +418,7 @@ def read_summary(workbook, header_index: dict[str, HeaderScan]) -> list[dict[str
 
 def cached_summary(source: Path) -> list[dict[str, Any]]:
     """Compatibility entry point used when creating a missing mapping file."""
-    workbook = load_workbook(source, read_only=True, data_only=True)
+    workbook = open_source(source, read_only=True, data_only=True)
     try:
         header_index = workbook_header_index(workbook)
         return read_summary(workbook, header_index)
@@ -474,7 +476,7 @@ def extract_quantity_table(
 
 def extract_first_quantity_table(source: Path, role: str) -> tuple[dict[str, list[Any]], int, str, int]:
     """Compatibility entry point for tests and direct callers."""
-    workbook = load_workbook(source, read_only=True, data_only=True)
+    workbook = open_source(source, read_only=True, data_only=True)
     try:
         header_index = workbook_header_index(workbook)
         return extract_quantity_table(workbook, header_index, role)
@@ -579,6 +581,11 @@ def mapping_record_for(
 
 
 def build_secondary(source: Path, output: Path, mapping_path: Path, orders_dir: Path | None = None, as_of_date: str = "") -> None:
+    with campaign_batch(source):
+        _build_secondary(source, output, mapping_path, orders_dir, as_of_date)
+
+
+def _build_secondary(source, output, mapping_path, orders_dir, as_of_date):
     output = assert_summary_output(output)
     if output in {source.resolve(), mapping_path.resolve()}:
         raise ValueError(f"汇总输出不能覆盖来源文件：{output}")
@@ -591,7 +598,7 @@ def build_secondary(source: Path, output: Path, mapping_path: Path, orders_dir: 
         if missing_attributes:
             LOGGER.warning("[车型属性缺失] 代际=%s | 文件=%s | 缺失字段=%s | 处理=保留未维护标记，影响相应参考匹配；请补齐整理表基本信息",
                            record["历史传播名"], mapping_path.name, "、".join(missing_attributes))
-    source_workbook = load_workbook(source, read_only=True, data_only=True)
+    source_workbook = open_source(source, read_only=True, data_only=True)
     try:
         header_index = workbook_header_index(source_workbook)
         summary_sheet_name = find_summary_sheet(source_workbook, header_index)[0].title
@@ -961,7 +968,8 @@ def forecast_signature(source, mapping, directory, as_of_date, *, legacy=False):
     inputs = [source, mapping, *forecast_order_files(directory)]
     if legacy:
         inputs.extend(REFRESH_CODE_DEPENDENCIES)
-    facts = [(str(path.resolve()), path.stat().st_size, path.stat().st_mtime_ns) for path in inputs]
+    facts = [edition_signature(path) if is_edition(path) else
+             (str(path.resolve()), path.stat().st_size, path.stat().st_mtime_ns) for path in inputs]
     if not legacy:
         # Identical calculation code can be installed in a new release directory
         # with new mtimes. Only its content affects the workbook.
@@ -1051,7 +1059,7 @@ def append_forecast_inputs(workbook, source, mapping_path, orders_dir, as_of_dat
 
     for path, kind in [(source, "历史"), (mapping_path, "映射"), *[(path, "订单") for path in forecast_order_files(orders_dir)]]:
         file_started = perf_counter()
-        book = (load_workbook(path, read_only=False, data_only=True) if preserve_layout
+        book = (open_source(path, read_only=False, data_only=True) if preserve_layout or is_edition(path)
                 else load_data_workbook(path, assert_output_is_private(
                     cache_dir if cache_dir is not None else excel_cache_directory())))
         loaded = perf_counter()
@@ -1742,7 +1750,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="汇总小订、首销、平销历史及当前真实订单")
     parser.add_argument("--orders", type=Path, default=DEFAULT_ORDERS, help="当前订单Excel目录")
     parser.add_argument("--as-of-date", default="", help="复盘日期YYYY-MM-DD，默认运行当天")
-    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE, help="原始历史数据文件")
+    parser.add_argument("--source", type=Path, default=preferred_source(DEFAULT_SOURCE), help="历史发布快照或原始工作簿")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="二次处理输出文件")
     parser.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING, help="默认从整理表第一个Sheet读取代际名、二级代际名和属性；显式指定时兼容旧映射文件")
     parser.add_argument("--force", action="store_true", help="忽略文件时间，强制重新生成二次处理文件")

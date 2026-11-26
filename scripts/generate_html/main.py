@@ -24,6 +24,7 @@ from core.data_paths import orders_input_directory, assert_output_is_private, fo
 from core.discovery import discover_subjects, set_capabilities
 from core.excel import WorkbookStore, reset_conflict_diagnostics
 from core.forecast_summary import SUMMARY_NAME, visible_target_names
+from core.campaign_source import preferred_source
 from core.model_identity import FORECAST_SOURCE_PATH
 from core.renderer import render_dashboard, forecast_manifest
 from core.validation import validate_manifest
@@ -162,7 +163,7 @@ def require_current_forecast_summary(input_dir: Path, summary_path: Path, as_of_
     )
 
     try:
-        source = resolve_source_path(DEFAULT_SOURCE)
+        source = resolve_source_path(preferred_source(DEFAULT_SOURCE))
         if not summary_is_current(source, summary_path, source, input_dir, as_of_date):
             raise ForecastSummaryNotCurrent
         audit_day = date.fromisoformat(as_of_date) if as_of_date else date.today()

@@ -10,6 +10,7 @@ import logging
 
 from openpyxl import load_workbook
 
+from core.campaign_source import open_source, preferred_source
 from core.excel import WorkbookItem, WorkbookStore, join_source_texts, source_files_text
 
 SUMMARY_NAME = "鸿蒙智行销量数据汇总.xlsx"
@@ -58,14 +59,14 @@ class WorkbookView:
 
 def input_path(default):
     active = ACTIVE_SUMMARY.get()
-    return active["path"] if active else default
+    return active["path"] if active else preferred_source(default)
 
 
 def open_input(path, **kwargs):
     active = ACTIVE_SUMMARY.get()
     if active and Path(path) == active["path"]:
         return active["inputs"]
-    return load_workbook(path, **kwargs)
+    return open_source(path, **kwargs)
 
 
 def table_records(workbook, name):

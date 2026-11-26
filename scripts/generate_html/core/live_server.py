@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from core.live_versions import previous_published_page
 from core.external_imports import ImportConflict, ImportStore, valid_text
 from core.config import SUMMARY_REUSE_UNAVAILABLE, load_config
+from core.campaign_source import LEGACY_NAME, published_path
 from core.data_paths import (
     FORECAST_SUMMARY_NAME, PROJECT_ROOT, forecast_reference_directory,
     model_information_directory,
@@ -61,6 +62,11 @@ def scan_inputs(input_dir: Path, project_root: Path = PROJECT_ROOT) -> InputSnap
                 if entry.is_symlink() or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                     path = path.resolve()
                 workbooks[path] = (info.st_size, info.st_mtime_ns)
+    edition = published_path(project_root)
+    if edition.is_file():
+        workbooks.pop(forecast_reference_directory(project_root).resolve() / LEGACY_NAME, None)
+        payload = edition.read_bytes()
+        workbooks[edition] = (len(payload), int.from_bytes(hashlib.sha256(payload).digest(), "big"))
     config_path = Path(project_root) / "scripts" / "generate_html" / "config.json"
     config = load_config(config_path)
     # The release directory/mtime can change on deployment with identical config.
@@ -82,6 +88,8 @@ def _input_changes(old: InputSnapshot, new: InputSnapshot) -> tuple[str, bool]:
         reasons.append(f"业务日期由 {old.day} 变为 {new.day}")
     if any(Path(name).name == "config.json" for name in changed):
         reasons.append("预测配置变化")
+    if any(Path(name).suffix.lower() == ".json" and Path(name).name != "config.json" for name in changed):
+        reasons.append("小订与首销发布数据变化")
     workbooks = [Path(name).stem for name in changed if Path(name).suffix.lower() == ".xlsx"]
     if workbooks:
         categories = ("首销期订单节奏", "小订退订分析", "小订选配比例", "锁单选配比例", "大定选配比例",

@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from core.campaign_source import edition_signature, is_edition, open_source, preferred_source
 from core.data_paths import orders_input_directory
 
 
@@ -95,14 +96,15 @@ def stage_records(path) -> list[dict]:
     source = Path(path)
     if not source.exists():
         return []
+    if is_edition(source):
+        return _stage_records(*edition_signature(source))
     stat = source.stat()
     return _stage_records(str(source.resolve()), stat.st_mtime_ns, stat.st_size)
 
 
 @lru_cache(maxsize=8)
 def _stage_records(path, stamp, size):
-    from openpyxl import load_workbook
-    book = load_workbook(path, read_only=True, data_only=True)
+    book = open_source(path, read_only=True, data_only=True)
     try:
         sheet = book.worksheets[0]
         rows = sheet.iter_rows(values_only=True)
@@ -144,7 +146,7 @@ def stage_label(name, parent) -> str:
 
 
 def generation_records() -> list[dict]:
-    return stage_records(FORECAST_SOURCE_PATH)
+    return stage_records(preferred_source(FORECAST_SOURCE_PATH))
 
 
 def resolve_stage_identity(name, records, launch=None):
