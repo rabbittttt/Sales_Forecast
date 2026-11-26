@@ -331,7 +331,7 @@
 .forecast-workspace.forecast-v2 .forecast-target-tabs button{
   box-sizing:border-box;min-width:0;min-height:32px;margin:0;padding:5px 10px;
   border:1px solid transparent;border-radius:6px;background:transparent;color:#425c74;
-  font:600 11px "Microsoft YaHei",sans-serif;line-height:1.4;box-shadow:none;
+  font:400 11px "Microsoft YaHei",sans-serif;line-height:1.4;box-shadow:none;
 }
 .forecast-workspace.forecast-v2 .forecast-stage-switcher button[aria-pressed=true]{
   background:#0d63ce;border-color:#0d63ce;color:#fff;box-shadow:none;
@@ -498,7 +498,7 @@
 @media(max-width:640px){
   .module-bar{overflow:visible;padding:5px 10px}
   .module-bar .module-nav{display:none}
-  .mobile-module-picker{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:600;color:#445e78}
+  .mobile-module-picker{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:400;color:#445e78}
   .mobile-module-picker select{flex:1;min-width:0;height:38px;border:1px solid #b9cfe5;border-radius:8px;background:#fff;color:#203f5d;padding:6px 10px;font:inherit;font-size:13px}
   .topbar .filters[data-mode=window]{grid-template-columns:minmax(0,1fr)}
   .period-context{padding:0;font-size:var(--type-note)}

@@ -1037,7 +1037,7 @@ button:focus-visible,select:focus-visible,input:focus-visible {
   padding:0 16px;
   border-radius:10px;
   font-size:12px;
-  font-weight:700;
+  font-weight:400;
 }
 
 .module-nav button:hover {
@@ -2094,7 +2094,7 @@ button:focus-visible,select:focus-visible,input:focus-visible {
   box-shadow:none;
   color:#6b7f95;
   font-size:var(--type-note);
-  font-weight:600;
+  font-weight:400;
 }
 
 .module-bar .module-nav .module-subnav button:hover {
