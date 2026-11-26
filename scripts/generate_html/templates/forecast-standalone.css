@@ -263,6 +263,7 @@ body.forecast-app .module-bar {
   padding:7px 20px;
   border-right:0;
   border-bottom:0;
+  box-shadow:inset 0 -1px var(--line);
   overflow:visible;
 }
 body.forecast-app .module-bar .module-nav {flex-direction:row;flex-wrap:wrap}
