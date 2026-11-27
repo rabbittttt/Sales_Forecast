@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -38,6 +38,7 @@ class ForecastDisabledRunTests(unittest.TestCase):
                     modules.append(module)
                 forecast = next(module for module in modules if module.id == "sales_forecast")
                 stack.enter_context(patch.object(generator, "load_config", side_effect=lambda _: dict(config)))
+                stack.enter_context(patch.object(generator, "campaign_batch", return_value=nullcontext(1)))
                 refresh = stack.enter_context(patch.object(generator, "refresh_sales_forecast_data"))
                 stack.enter_context(patch.object(generator, "WorkbookStore", return_value=store))
                 stack.enter_context(patch.object(generator, "discover_subjects", return_value=subjects))

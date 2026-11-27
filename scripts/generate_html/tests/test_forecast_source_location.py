@@ -1,5 +1,5 @@
 """Forecasts use the shared summary and leave source workbooks untouched."""
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -26,6 +26,7 @@ class ForecastSourceLocationTests(TestCase):
         config = dict(title='测试', chart_render_mode='generated',
                       build_manifest_mode='off', module_order=['sales_forecast'])
         stack.enter_context(patch.object(generator, 'load_config', return_value=config))
+        stack.enter_context(patch.object(generator, "campaign_batch", return_value=nullcontext(1)))
         stack.enter_context(patch.object(generator, 'refresh_sales_forecast_data'))
         stack.enter_context(patch.object(generator, 'forecast_target_names', return_value=[]))
         stack.enter_context(patch('core.discovery.generation_records', return_value=[]))

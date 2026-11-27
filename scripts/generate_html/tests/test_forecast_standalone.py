@@ -6,7 +6,7 @@ import copy
 import gzip
 import json
 import re
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -159,6 +159,7 @@ class StandaloneForecastTests(TestCase):
                     module.build.side_effect = lambda store, subject, mid=module.id: (
                         Dashboard(mid, subject.id, {}) if subject.type == "group" else None)
                 stack.enter_context(patch.object(generator, "load_config", side_effect=lambda _: dict(config)))
+                stack.enter_context(patch.object(generator, "campaign_batch", return_value=nullcontext(1)))
                 refresh = stack.enter_context(patch.object(generator, "refresh_sales_forecast_data"))
                 stack.enter_context(patch.object(generator, "WorkbookStore", return_value=store))
                 stack.enter_context(patch.object(generator, "discover_subjects", return_value=subjects))
