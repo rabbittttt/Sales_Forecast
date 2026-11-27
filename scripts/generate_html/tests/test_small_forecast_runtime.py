@@ -95,10 +95,12 @@ const scenario=process.argv[1],ended=scenario!=='active';
 reference.small_start_date='2026-08-01';
 const history=[reference];
 if(ended){
-  actual.small_daily_days=[];
-  const reported=scenario==='ended-zero'?0:null;
+  const hasDaily=['ended-transition','ended-maintained','ended-daily'].includes(scenario);
+  actual.small_daily_days=hasDaily?[5,0,2,3].map((orders,index)=>({date:'2026-09-0'+(index+1),orders})):[];
+  actual.total_small=scenario==='ended-transition'?70:0;
+  const reported=scenario==='ended-zero'?0:['ended-maintained','ended-transition'].includes(scenario)?50:null;
   history.push({model:target.name,small_start_date:target.smallStartDate,small_end_date:target.smallEndDate,
-    days:target.smallDays,reported_total:reported,total:reported,total_complete:false,daily_actual:false,total_source:'车型汇总'});
+    days:target.smallDays,reported_total:reported,total:reported,total_complete:reported>0,daily_actual:false,total_source:'车型汇总'});
 }
 bindSmallOrderForecast(root,{small_order_history:history},{sameModel:(a,b)=>a===b,targetState:()=>target,
   findActual:()=>actual,findStageActual:()=>actual,todayIso:()=>ended?'2026-09-06':'2026-09-03',
@@ -126,6 +128,14 @@ console.log(JSON.stringify({status,total:kpi('total'),actual:kpi('actual'),compl
                 self.assertEqual((data['total'], data['actual']), (expected, expected))
                 self.assertEqual(data['completion'], '—')
                 self.assertEqual(data['hidden'], error_hidden)
+
+    def test_ended_kpis_prefer_stage_total_then_maintained_total_then_complete_daily_sum(self):
+        for scenario, expected in [('ended-transition', '70'), ('ended-maintained', '50'), ('ended-daily', '10')]:
+            with self.subTest(scenario=scenario):
+                data = self.render_small_workspace(scenario)
+                self.assertEqual((data['total'], data['actual']), (expected, expected))
+                self.assertEqual(data['completion'], '100.0')
+                self.assertTrue(data['hidden'])
 
     def test_static_page_move_migrates_only_valid_same_project_file_state(self):
         script = r"""

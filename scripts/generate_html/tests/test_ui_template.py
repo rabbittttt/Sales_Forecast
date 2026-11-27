@@ -272,7 +272,6 @@ assert(!/data-rhythm-label="segment"[^>]*>1<\/text>/.test(launchHtml),'too-small
         self.assertIn("setForecastStageSummary(root,'launch',stageBadge,stageSource)", script)
         self.assertIn("setForecastStageSummary(root,'steady',stageLabel,sourceText)", script)
         self.assertIn("findStageActual(target.name,'before')", script)
-        self.assertIn("transitionTotal||(current?.total_complete!==false?current?.total:0)", script)
         self.assertIn("整理表→小订选配比例→小订退订分时汇总", script)
         self.assertNotIn("findStageActual(target.name,'ended')", script)
         self.assertIn("const targetSteady=target=>history.find", script)
