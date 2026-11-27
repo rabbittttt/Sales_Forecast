@@ -655,7 +655,7 @@ assert(!/data-rhythm-label="segment"[^>]*>1<\/text>/.test(launchHtml),'too-small
         self.assertIn("实际对比与得分贡献", script)
         self.assertIn('.forecast-pane[data-forecast-pane="score"].active', css)
         self.assertIn(".forecast-score-rule-box", css)
-        self.assertIn(".forecast-score-detail-table th:nth-child(2),.forecast-score-detail-table td:nth-child(2){width:210px;min-width:210px;max-width:210px;white-space:normal;overflow-wrap:anywhere}", css)
+        self.assertIn(".forecast-score-detail-table td:nth-child(2){white-space:normal;overflow-wrap:anywhere}", css)
 
     def test_small_and_steady_score_pages_explain_the_actual_ranking(self):
         script = read_template(ROOT / "templates/dashboard.js")

@@ -25,6 +25,46 @@ async function openPortal(browser, origin, errors) {
   return {context, page, frame};
 }
 
+async function checkCandidateLayout(page, groups, {stage, singleCampaign}) {
+  for (const group of await groups.all()) {
+    const candidates = group.locator('details.forecast-score-row-details');
+    const count = await candidates.count();
+    if (singleCampaign) assert.equal(count, 2, stage+' fixture candidates');
+    if (!count) continue;
+    assert(await candidates.evaluateAll(rows => rows.every(row => row.open)), stage+' default expansion');
+    const first = candidates.first(), parts = first.locator('.forecast-score-parts');
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({width, height: 900});
+      const layout = await parts.evaluate(grid => {
+        const row = grid.closest('tr');
+        const bounds = grid.getBoundingClientRect();
+        const score = row.querySelector('[role="progressbar"]').getBoundingClientRect();
+        const cards = [...grid.querySelectorAll('.forecast-score-part')].map(card => card.getBoundingClientRect());
+        return {
+          rowWidth: row.getBoundingClientRect().width, gridWidth: bounds.width,
+          left: bounds.left, right: bounds.right, viewport: innerWidth,
+          detailTop: grid.closest('details').getBoundingClientRect().top, scoreBottom: score.bottom,
+          cardCount: cards.length, columns: new Set(cards.map(card => Math.round(card.left))).size,
+          overflow: grid.scrollWidth - grid.clientWidth,
+        };
+      });
+      const evidence = stage+' at '+width+'px '+JSON.stringify(layout);
+      assert(layout.cardCount > 1 && layout.gridWidth >= layout.rowWidth * .9, evidence);
+      assert(layout.detailTop >= layout.scoreBottom - 1, evidence);
+      assert(layout.left >= -1 && layout.right <= layout.viewport + 1 && layout.overflow <= 1, evidence);
+      assert(width === 1440 ? layout.columns > 1 : layout.columns === 1, evidence);
+      const toggle = first.locator(':scope > summary');
+      await toggle.click();
+      assert(!(await first.evaluate(el => el.open)) && !(await parts.isVisible()), stage+' collapse');
+      if (count > 1) assert(await candidates.nth(1).evaluate(el => el.open), stage+' independent expansion');
+      await toggle.focus();
+      await page.keyboard.press('Enter');
+      assert(await first.evaluate(el => el.open) && await parts.isVisible(), stage+' keyboard expansion');
+    }
+  }
+  await page.setViewportSize({width: 1440, height: 900});
+}
+
 async function checkLayout(page, frame, {singleCampaign}) {
   const model = frame.getByRole('combobox', {name: '预测车型', exact: true});
   const parameterMenu = frame.locator('#forecastNavParameters');
@@ -123,9 +163,10 @@ async function checkLayout(page, frame, {singleCampaign}) {
         const formulas = methodology.locator('.forecast-score-formula');
         assert.equal(await formulas.count(), stage === 'small' ? 2 : 1);
         for (const formula of await formulas.all()) assert(await formula.isVisible());
-        const candidateDetails = scores.locator('.forecast-score-detail-table .forecast-score-row-details');
-        assert.equal(await candidateDetails.locator('xpath=self::*[not(@open)]').count(), 0);
-        assert.equal(await scores.locator('.forecast-score-detail-table .forecast-score-part-rule').count(), 0);
+        const groups = scores.locator('.forecast-score-detail');
+        assert.equal(await groups.count(), stage === 'small' ? 2 : 1);
+        await checkCandidateLayout(page, groups, {stage, singleCampaign});
+        assert.equal(await groups.locator('.forecast-score-part-rule').count(), 0);
         if (stage === 'small') {
           const scopes = await scores.locator('.forecast-score-scope').allTextContents();
           assert.equal(scopes.length, 2);
