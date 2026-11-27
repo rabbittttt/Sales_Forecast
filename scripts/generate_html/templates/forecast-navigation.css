@@ -848,6 +848,8 @@
   .forecast-workspace.forecast-studio .forecast-score-detail-table tbody td::before{content:attr(data-label);min-width:0;color:var(--muted);font-size:10px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
   .forecast-workspace.forecast-studio .forecast-score-detail-table tbody td[colspan]{display:block;border-top:0}
   .forecast-workspace.forecast-studio .forecast-score-detail-table tbody td[colspan]::before{display:none}
+  .forecast-workspace.forecast-studio .forecast-score-detail-table tbody td:nth-child(5){display:block}
+  .forecast-workspace.forecast-studio .forecast-score-detail-table tbody td:nth-child(5)::before{display:none}
   .forecast-workspace.forecast-studio .forecast-score-detail-table .forecast-score-row-details{width:100%;min-width:0}
   .forecast-workspace.forecast-studio .forecast-score-detail-table .forecast-score-row-details>summary{width:100%;box-sizing:border-box}
   .forecast-workspace.forecast-studio .forecast-score-detail-table .forecast-score-row-details .forecast-score-parts{grid-template-columns:minmax(0,1fr);width:100%}

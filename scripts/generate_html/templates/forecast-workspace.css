@@ -922,7 +922,12 @@
 .forecast-score-row-details{min-width:0;margin:0}
 .forecast-score-row-details>summary{display:flex;align-items:center;gap:5px;width:max-content;max-width:100%;padding:4px 7px;border:1px solid #D5E5F3;border-radius:6px;background:#F7FBFF;color:#315F85;font-size:var(--type-note);line-height:1.4;cursor:pointer;white-space:normal}
 .forecast-score-row-details[open]>summary{margin-bottom:6px;background:#EAF4FE;border-color:#AFCFEA}
-.forecast-score-row-details .forecast-score-parts{min-width:0}
+.forecast-score-row-details .forecast-score-parts{min-width:0;grid-template-columns:repeat(auto-fit,minmax(min(235px,100%),1fr));gap:3px 10px}
+.forecast-score-row-details .forecast-score-part{display:flex;flex-wrap:wrap;align-content:start;align-items:baseline;justify-content:space-between;gap:1px 6px;min-width:0;padding:3px 0;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;line-height:1.45}
+.forecast-score-row-details .forecast-score-part small{display:block;flex-basis:100%;overflow-wrap:anywhere}
+.forecast-score-row-details .forecast-score-part.unavailable small{flex-basis:auto}
+.forecast-score-section-head .forecast-score-scope{margin:3px 0 0;color:var(--muted);font-size:var(--type-note);line-height:1.5}
+.forecast-score-methodology [data-score-explanation]{margin:4px 0;line-height:1.5}
 @media(max-width:960px){.forecast-v2 .forecast-score-formula{width:100%;justify-content:flex-start}}
 
 /* 销量预测统一设计层：结果优先、参数侧栏、分组依据 */
