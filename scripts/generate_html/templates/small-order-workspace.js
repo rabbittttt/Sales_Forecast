@@ -80,9 +80,10 @@
 
 
 
-      workspace.querySelector('[data-small-score]').innerHTML=renderLifecycleScorePage({title:'小订参考车型排名与逐项得分',description:'产品档位、能源类型、发布类型、小订窗口天数，以及双方均有正数时的小订量级共同决定参考。',rules:smallScoreRules,rows:ranked().slice(0,10),selected:selects.map(select=>select.value),empty:'暂无同时具备历史最终小订和可评分字段的候选车型',minimumEvidence});
+      const dailyScore={title:'小订参考车型排名与逐项得分',description:'产品档位、能源类型、发布类型、小订窗口天数，以及双方均有正数时的小订量级共同决定参考。',rules:smallScoreRules,rows:ranked().slice(0,10),selected:selects.map(select=>select.value),empty:'暂无同时具备历史最终小订和可评分字段的候选车型',minimumEvidence};
       const hourlyRules=[{key:'release_hour',label:'发布时间',weight:.2,rule:'起始小时差越小越相似，差12小时为0分。'},{key:'hour_slope',label:'小时增量斜率',weight:.5,rule:'已发生小时新增占比的差异越小越相似；不比较D1绝对量。'},{key:'hour_progress',label:'前几小时累计占比',weight:.3,rule:'各小时累计占已发生总量的比例，与历史同期归一化曲线比较。'}];
-      workspace.querySelector('[data-small-score]').innerHTML+=renderLifecycleScorePage({title:'按发布时间与分时曲线选择参考',description:'比较发布后的相对小时；发布时间20%、小时增量斜率50%、累计占比30%。缺项后按有效权重归一。',rules:hourlyRules,rows:ranked('hourly').slice(0,10),selected:groups.hourly.selects.map(select=>select.value),empty:'暂无可比较的真实分时曲线',minimumEvidence:1,weighted:true});
+      const hourlyScore={title:'按发布时间与分时曲线选择参考',description:'比较发布后的相对小时；发布时间20%、小时增量斜率50%、累计占比30%。缺项后按有效权重归一。',rules:hourlyRules,rows:ranked('hourly').slice(0,10),selected:groups.hourly.selects.map(select=>select.value),empty:'暂无可比较的真实分时曲线',minimumEvidence:1,weighted:true};
+      workspace.querySelector('[data-small-score]').innerHTML=renderLifecycleScorePage(dailyScore,hourlyScore);
     };
     const enforceDistinctRefs=()=>{const used=new Set();selects.forEach(select=>{if(select.value&&used.has(select.value))select.value='';if(select.value)used.add(select.value)});selects.forEach(select=>{for(const option of select.options)option.disabled=!!option.value&&(sameModel(option.dataset.model||option.textContent,targetState().name)||selects.some(other=>other!==select&&other.value===option.value))})};
     const update=()=>{enforceDistinctRefs();const target=targetState(),stage=stageFor(target),current=targetItem(),actual=findActual(target.name),transition=findStageActual(target.name,'before'),transitionTotal=Number(transition?.total_small||0),transitionSource=transition?.field_sources?.['总小订']||transition?.selected_source_label||'数据缺失',targetDays=Math.max(stage.days||target.smallDays||current?.daily_orders?.length||1,1),refs=selectedRefs();

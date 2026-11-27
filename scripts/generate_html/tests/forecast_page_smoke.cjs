@@ -116,7 +116,16 @@ async function checkLayout(page, frame, {singleCampaign}) {
           assert.equal(await score.locator('.forecast-score-hero').count(), 0);
           assert(await score.locator(':scope > :first-child').evaluate(el =>
             el.matches('.forecast-score-summary,.forecast-score-detail')));
-          assert.equal(await score.locator('.forecast-score-methodology .forecast-score-formula').count(), 1);
+        }
+        assert.equal(await scores.locator('.forecast-score-methodology').count(), 1);
+        const methodology = scores.last().locator(':scope > details.forecast-score-methodology:last-child');
+        assert(await methodology.evaluate(el => el.open));
+        const formulas = methodology.locator('.forecast-score-formula');
+        assert.equal(await formulas.count(), stage === 'small' ? 2 : 1);
+        for (const formula of await formulas.all()) assert(await formula.isVisible());
+        if (stage === 'small') {
+          assert.deepEqual(await methodology.locator('h4').allTextContents(),
+            await scores.locator('.forecast-score-detail h4').allTextContents());
         }
       }
     }
