@@ -56,6 +56,7 @@ class OctoberAuditTests(TestCase):
             _attach_small_hourly_curves([small], [profile], today=date(2026, 9, 2))
         self.assertEqual(launch['hourly_curve'][18], 1)
         self.assertEqual(small['small_hourly_curve'][18], 1)
+        self.assertEqual(small['small_hourly_total'], 30)
 
     def test_finished_d1_with_omitted_zero_hours_keeps_real_clock(self):
         for stage in ('small', 'launch'):

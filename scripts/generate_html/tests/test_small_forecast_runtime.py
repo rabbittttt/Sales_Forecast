@@ -91,8 +91,13 @@ const reference={model:'reference',event_id:'ref',total:1000,days:4,tier:'SUV',e
 const actual={total_small:0,small_daily_days:[{date:'2026-09-01',orders:100},{date:'2026-09-02',orders:200},{date:'2026-09-03',orders:999}]};
 const calendarType=(start,index)=>({date:new Date(Date.parse(start+'T00:00:00Z')+index*86400000).toISOString().slice(0,10),type:'workday'});
 const planBridge=(stage,args)=>anchoredAllocate({...args,factors:args.dates.map(()=>1),weights:args.dates.map((_,i)=>i===0?0:i===1?.5:1)});
-const scenario=process.argv[1],ended=scenario!=='active';
+const scenario=process.argv[1],ended=scenario.startsWith('ended-');
 reference.small_start_date='2026-08-01';
+if(scenario==='active'){
+  reference.daily_actual=true;
+  reference.dates=['2026-08-01','2026-08-02','2026-08-03','2026-08-04'];
+  reference.daily_orders=[250,250,250,250];
+}
 const history=[reference];
 if(ended){
   const hasDaily=['ended-transition','ended-maintained','ended-daily'].includes(scenario);
@@ -106,7 +111,7 @@ bindSmallOrderForecast(root,{small_order_history:history},{sameModel:(a,b)=>a===
   findActual:()=>actual,findStageActual:()=>actual,todayIso:()=>ended?'2026-09-06':'2026-09-03',
   calendarType,planBridge,factors:()=>({workday:1,weekend:1,holiday:1})});
 const kpi=key=>node(`[data-small-kpi="${key}"]`).textContent;
-console.log(JSON.stringify({status,total:kpi('total'),actual:kpi('actual'),completion:kpi('completion'),error:node('[data-small-error]').textContent,hidden:node('[data-small-error]').hidden}));
+console.log(JSON.stringify({status,reference:select.value,total:kpi('total'),actual:kpi('actual'),completion:kpi('completion'),error:node('[data-small-error]').textContent,hidden:node('[data-small-error]').hidden}));
 '''.replace('MATH', json.dumps(str(ROOT / 'templates/forecast-math.js'))).replace('DASHBOARD', json.dumps(str(ROOT / 'templates/dashboard.js')))
         result = subprocess.run(['node', '-e', script, scenario], capture_output=True, encoding='utf-8')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -120,6 +125,13 @@ console.log(JSON.stringify({status,total:kpi('total'),actual:kpi('actual'),compl
         self.assertTrue(data['hidden'])
         self.assertIn('D3', data['status']['small']['label'])
         self.assertNotIn('判定中', data['status']['small']['label'])
+
+    def test_active_small_does_not_auto_select_a_reference_with_only_final_total_and_curve(self):
+        data = self.render_small_workspace('active-missing-reference-daily')
+        self.assertEqual(data['reference'], '')
+        self.assertEqual(data['actual'], '300')
+        self.assertEqual(data['total'], '—')
+        self.assertFalse(data['hidden'])
 
     def test_ended_kpis_distinguish_explicit_zero_from_unknown(self):
         for scenario, expected, error_hidden in [('ended-zero', '0', True), ('ended-unknown', '—', False)]:

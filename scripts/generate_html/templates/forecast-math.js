@@ -264,10 +264,83 @@
     };
   }
 
+  const smallScoreWeights = Object.freeze({d1:.35, size:.30, tier:.15, node:.10, energy:.05, days:.05});
+
+  function smallScoreObservation(target, today, actual, history, generatedAt) {
+    const stamp = String(generatedAt || '').match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):/);
+    const asOf = stamp && stamp[1] < today ? stamp[1] : today;
+    const stage = smallStage(target, asOf);
+    const completedOrders = [];
+    if (target.hasSmall === false || target.windowInputErrors?.small || ['unknown','before'].includes(stage.key))
+      return {completedOrders};
+
+    if (stage.key !== 'd1') {
+      const daily = (actual?.small_daily_days || []).map(row => ({date:row.date, orders:observedQuantity(row.orders)}));
+      const fallback = history?.daily_actual === true && (history.small_start_date || history.dates?.[0]) === target.smallStartDate
+        ? (history.dates || []).map((date,i) => ({date, orders:observedQuantity(history.daily_orders?.[i])})) : [];
+      const checked = completedSmallOrderDays(target.smallStartDate,target.smallEndDate,asOf,daily,fallback);
+      for (const row of checked.rows) {
+        if (row.label !== 'D'+(completedOrders.length+1)) break;
+        completedOrders.push(row.orders);
+      }
+      return {completedOrders};
+    }
+
+    const day = (actual?.small_hourly_days || []).find(row => row.date === target.smallStartDate);
+    if (!day || day.hourly_valid === false) return {completedOrders};
+    const closedHours = (day.hours || []).filter(row => !stamp || stamp[1] !== asOf || row.hour < Number(stamp[2]));
+    const start = releaseHourForTarget(target,'small',closedHours);
+    if (start < 0) return {completedOrders};
+    const quantities = new Map();
+    for (const row of closedHours) {
+      if (!Number.isInteger(row.hour) || row.hour < 0 || row.hour > 23 || quantities.has(row.hour)) return {completedOrders};
+      quantities.set(row.hour,observedQuantity(row.orders));
+    }
+    let elapsed=0, orders=0;
+    for (let hour=start; hour<24 && Number.isFinite(quantities.get(hour)); hour++) {
+      orders+=quantities.get(hour);
+      elapsed++;
+    }
+    return elapsed ? {completedOrders,d1Hours:{elapsed,orders}} : {completedOrders};
+  }
+
+  // Dates in older reports can be sparse. Keep each observation on its own release day.
+  function smallReferenceDailyPrefix(item, count) {
+    if (item.daily_actual === false || !count) return [];
+    const daily = item.daily_orders || [], dates = item.dates || [];
+    const start = dateNumber(item.small_start_date || dates[0]);
+    if (!dates.length && item.daily_actual !== true) return [];
+    const byDate = new Map();
+    for (const [i,date] of dates.entries()) byDate.set(date,byDate.has(date)?NaN:observedQuantity(daily[i]));
+    const prefix = [];
+    for (let i=0; i<count && i<daily.length; i++) {
+      if (Number(item.days)>0 && i>=Number(item.days)) break;
+      const date = Number.isFinite(start)?new Date(start+i*86400000).toISOString().slice(0,10):'';
+      if (item.small_end_date && date>item.small_end_date) break;
+      const value = dates.length ? byDate.get(date) : observedQuantity(daily[i]);
+      if (!Number.isFinite(value)) break;
+      prefix.push(value);
+    }
+    return prefix;
+  }
+
+  function smallReferenceHourlyCount(item, d1, elapsed) {
+    const start=smallHourlyStart(item), last=start+elapsed-1, curve=item.small_hourly_curve || [];
+    const total=observedQuantity(item.small_hourly_total ?? d1);
+    if (!Number.isFinite(total) || start<0 || !Number.isInteger(elapsed) || elapsed<1 || last>23 || curve.length!==24) return NaN;
+    // The original curve is cumulative by wall-clock hour and validated against a full D1.
+    // Subtract pre-release sales and keep the candidate's own D1 denominator.
+    // Some older curves use blanks before the first trading hour.
+    const preRelease=curve.slice(0,start);
+    const prior=preRelease.every(value=>value==null || value===0)?0:observedRate(curve[start-1]);
+    const end=observedRate(curve[last]);
+    return end>=prior && observedRate(curve[23])===1 ? Math.round(total*(end-prior)) : NaN;
+  }
+
   function smallReferenceScore(item = {}, target = {}, current = {}, minimumEvidence = 3) {
     current = current || {};
     const parts = [];
-    const add = (key, value, evidence) => parts.push({ key, value, evidence });
+    const add = (key, value, evidence) => parts.push({ key, value, evidence, weight:smallScoreWeights[key] });
     const itemTier = String(item.tier || '');
     const targetTier = String(target.tier || '');
     const sameBody = ['SUV', 'MPV', '轿车'].some(word => targetTier.includes(word) && itemTier.includes(word));
@@ -285,8 +358,26 @@
     add('days', targetDays > 0 && itemDays > 0
       ? Math.max(0, 1 - Math.abs(targetDays - itemDays) / Math.max(targetDays, 36)) : NaN,
     `${targetDays || 0}天 ↔ ${itemDays || 0}天`);
-    add('size', closeness(current.total, item.total), `${Number(current.total) || 0} ↔ ${Number(item.total) || 0}`);
-    return scoredEvidence(parts, minimumEvidence);
+    const completed = current.completedOrders || [], n=completed.length;
+    const reference = smallReferenceDailyPrefix(item,Math.max(1,n));
+    const hourly = current.d1Hours;
+    const quantities = [];
+    if (n) quantities.push(['d1','D1 全天',completed[0],reference[0] ?? observedQuantity(item.small_hourly_total)]);
+    else if (hourly) quantities.push(['d1','D1 发布后前'+hourly.elapsed+'小时',hourly.orders,smallReferenceHourlyCount(item,reference[0],hourly.elapsed)]);
+    if (n>=2) {
+      const sum=orders=>orders.reduce((total,value)=>total+observedQuantity(value),0);
+      quantities.push(['size','D1–D'+n+' 累计',sum(completed),reference.length===n?sum(reference):NaN]);
+    }
+    for (const [key,period,left,right] of quantities) {
+      if (!Number.isFinite(left) || !Number.isFinite(right)) continue;
+      const score=left===right?1:Math.min(left,right)/Math.max(left,right);
+      add(key,score,`${period} ${left}单 ↔ ${period} ${right}单`);
+    }
+    const result=scoredEvidence(parts,minimumEvidence);
+    const weight=result.parts.reduce((sum,part)=>sum+part.weight,0);
+    result.score=weight?result.parts.reduce((sum,part)=>sum+part.value*part.weight,0)/weight:0;
+    result.eligible=result.eligible && quantities.every(([key])=>result.parts.some(part=>part.key===key));
+    return result;
   }
 
   const RELEASE_HOURS = Object.freeze({'上午':9,'下午':14,'晚上':19});
@@ -924,6 +1015,8 @@
     closeness,
     adaptSmallDailyOrders,
     smallReferenceScore,
+    smallScoreObservation,
+    smallScoreWeights,
     releaseStartHour,
     releaseHourForTarget,
     smallHourlyStart,

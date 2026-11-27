@@ -335,6 +335,118 @@ class ForecastMathTests(unittest.TestCase):
         self.assertEqual(eligible["evidenceCount"], 3)
         self.assertTrue(eligible["eligible"])
 
+    def score_small_history(self, cases):
+        # The target and the completed historical event start in different months.
+        history = {
+            'tier': 'SUV', 'energy': '纯电', 'node': '新车', 'days': 3,
+            'small_start_date': '2026-08-01', 'daily_actual': True, 'total': 1050,
+            'dates': ['2026-08-01', '2026-08-02', '2026-08-03'],
+            'daily_orders': [100, 50, 900],
+        }
+        target = {'tier': 'SUV', 'energy': '纯电', 'node': '新车', 'smallDays': 3,
+                  'smallStartDate': '2026-11-10'}
+        return self.run_node(
+            f"({json.dumps(cases)}).map(([changes,current])=>"
+            f"m.smallReferenceScore({{...{json.dumps(history)},...changes}},{json.dumps(target)},current,3))"
+        )
+
+    def test_small_observation_uses_only_consecutive_completed_days(self):
+        result = self.run_node("""(()=>{
+          const target={smallStartDate:'2026-11-10',smallEndDate:'2026-11-14',smallDays:5};
+          const daily=[{date:'2026-11-10',orders:100},{date:'2026-11-11',orders:50},
+                       {date:'2026-11-12',orders:700}];
+          const observe=rows=>m.smallScoreObservation(target,'2026-11-12',{small_daily_days:rows},
+            {total:9999,daily_actual:false},'2026-11-12T15:30:00').completedOrders;
+          return [observe(daily),observe([daily[0],daily[2]]),observe([daily[1],daily[2]])];
+        })()""")
+        self.assertEqual(result, [[100, 50], [100], []])
+
+    def test_small_d1_observation_excludes_the_unfinished_hour_and_day_snapshot(self):
+        result = self.run_node("""(()=>{
+          const start='2026-11-10',target={smallStartDate:start,smallEndDate:'2026-11-14',
+            smallDays:5,smallPeriod:'晚上',releaseDefaults:{small_period:'晚上',
+              small_start_date:start,small_release_start_hour:18}};
+          const actual={small_daily_days:[{date:start,orders:9999}],small_hourly_days:[{
+            date:start,hours:[{hour:18,orders:90},{hour:19,orders:30},{hour:20,orders:700}],
+            orders:820,last_hour:20}]};
+          return m.smallScoreObservation(target,start,actual,{total:88888},start+'T20:30:00');
+        })()""")
+        self.assertEqual(result['completedOrders'], [])
+        self.assertEqual(result['d1Hours']['elapsed'], 2)
+        self.assertEqual(result['d1Hours']['orders'], 120)
+
+    def test_small_score_compares_same_elapsed_days_and_separates_d1(self):
+        observed = {'completedOrders': [100, 50], 'total': 888888}
+        baseline, future, different_d1, first_day = self.score_small_history([
+            [{}, observed],
+            [{'daily_orders': [100, 50, 5], 'total': 155}, observed],
+            [{'daily_orders': [50, 100, 900]}, observed],
+            [{}, {'completedOrders': [100]}],
+        ])
+        self.assertEqual(baseline, future, 'Historical D3 and final total cannot affect a D2 score')
+        parts = {part['key']: part for part in different_d1['parts']}
+        self.assertEqual({key: part['weight'] for key, part in parts.items()},
+                         {'d1': .35, 'size': .30, 'tier': .15, 'node': .10, 'energy': .05, 'days': .05})
+        self.assertEqual(parts['d1']['value'], .5)
+        self.assertEqual(parts['size']['value'], 1)
+        self.assertAlmostEqual(baseline['score'], 1)
+        self.assertAlmostEqual(different_d1['score'], .825)
+        first_keys = {part['key'] for part in first_day['parts']}
+        self.assertIn('d1', first_keys)
+        self.assertNotIn('size', first_keys, 'Do not count the first day twice')
+
+    def test_small_score_d1_partial_compares_the_same_hours_since_release(self):
+        history = {'release_start_hour': 18, 'daily_orders': [300, 50, 900],
+                   'small_hourly_curve': [0]*18 + [.1, .4, .6, .8, .95, 1]}
+        first_hours = {'completedOrders': [], 'd1Hours': {'elapsed': 2, 'orders': 120}}
+        matching, different, early_sales, missing, past_midnight = self.score_small_history([
+            [history, first_hours],
+            [history, {'completedOrders': [], 'd1Hours': {'elapsed': 2, 'orders': 60}}],
+            [{**history, 'small_hourly_curve': [0]*17 + [.1, .3, .5, .6, .8, .95, 1]}, first_hours],
+            [{**history, 'small_hourly_curve': []}, first_hours],
+            [history, {'completedOrders': [], 'd1Hours': {'elapsed': 7, 'orders': 120}}],
+        ])
+        for row, expected in [(matching, 1), (different, .5), (early_sales, 1)]:
+            parts = {part['key']: part for part in row['parts']}
+            self.assertAlmostEqual(parts['d1']['value'], expected)
+            self.assertNotIn('size', parts)
+        self.assertIn('120', next(p['evidence'] for p in matching['parts'] if p['key'] == 'd1'))
+        for row in [missing, past_midnight]:
+            self.assertFalse(row['eligible'])
+            self.assertFalse({'size', 'd1'} & {part['key'] for part in row['parts']})
+
+    def test_small_score_gaps_zero_and_missing_observations(self):
+        observed = {'completedOrders': [100, 50]}
+        no_actuals, future_only, missing_date, true_zero, both_zero = self.score_small_history([
+            [{}, {'completedOrders': [], 'total': 1050}],
+            [{'daily_actual': False}, observed],
+            [{'dates': ['2026-08-01', '2026-08-03'], 'daily_orders': [100, 900]}, observed],
+            [{}, {'completedOrders': [0, 50]}],
+            [{'daily_orders': [0, 0, 100]}, {'completedOrders': [0, 0]}],
+        ])
+        for row in [no_actuals, future_only]:
+            self.assertFalse({'size','d1'} & {part['key'] for part in row['parts']})
+        gap_keys = {part['key'] for part in missing_date['parts']}
+        self.assertIn('d1', gap_keys)
+        self.assertNotIn('size', gap_keys, 'Missing D2 must not be replaced with D3 or final total')
+        zeros = {part['key']: part['value'] for part in true_zero['parts']}
+        self.assertEqual(zeros['d1'], 0)
+        self.assertAlmostEqual(zeros['size'], 50/150)
+        double_zero = {part['key']: part['value'] for part in both_zero['parts']}
+        self.assertEqual((double_zero['d1'], double_zero['size']), (1, 1))
+        self.assertTrue(no_actuals['eligible'])
+        self.assertFalse(missing_date['eligible'])
+
+    def test_small_score_renormalizes_and_ranks_observed_sales_ahead_of_metadata(self):
+        observed = {'completedOrders': [100, 50]}
+        volumes_match, metadata_match, no_volume = self.score_small_history([
+            [{'tier': '轿车', 'node': '改款', 'energy': '纯电'}, observed],
+            [{'daily_orders': [10, 5, 900]}, observed],
+            [{'tier': '轿车', 'node': '改款'}, {'completedOrders': []}],
+        ])
+        self.assertGreater(volumes_match['score'], metadata_match['score'])
+        self.assertAlmostEqual(no_volume['score'], (.15*.45 + .10*.62 + .05 + .05)/.35)
+
     def test_steady_reference_requires_three_valid_evidence_items(self):
         insufficient = self.run_node(
             "m.steadyReferenceScore({tier:'SUV',energy:'增程'},"

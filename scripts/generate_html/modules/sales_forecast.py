@@ -2362,6 +2362,7 @@ def _attach_actual_shapes(history: list[dict[str, Any]], profiles: list[dict[str
 def _attach_small_hourly_curves(small_history: list[dict[str, Any]], profiles: list[dict[str, Any]], today: date | None = None) -> None:
     for item in small_history:
         item["small_hourly_curve"] = []
+        item.pop("small_hourly_total", None)
         item.pop("small_start_hour", None)
         profile = next(
             (
@@ -2392,6 +2393,7 @@ def _attach_small_hourly_curves(small_history: list[dict[str, Any]], profiles: l
         # Keep validated pre-order zeros: a maintained release period may start
         # before the first sale. The frontend alone resolves the release anchor.
         item["small_hourly_curve"] = curve
+        item["small_hourly_total"] = sum(float(row["orders"]) for row in bucket["hours"])
         item["small_start_hour"] = start_hour
 
 
