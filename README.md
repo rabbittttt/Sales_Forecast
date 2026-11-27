@@ -92,7 +92,7 @@
 | 用途 | 默认位置 | 覆盖方式 |
 | --- | --- | --- |
 | 订单 Excel | `../工作台数据/shared/订单汇总/` | `SHARED_DATA_ROOT` 指定共享根，生成器的 `--input` 指定本次订单输入目录 |
-| 小订及首销数据整理表与参考文件 | `../工作台数据/shared/订单汇总/` | 优先读取车型配置「小订与首销」已发布 JSON（数据根下的 `database/vehicle-config/campaigns/published.json`，可用 `VEHICLE_CONFIG_CAMPAIGN_SNAPSHOT` 指定）。首次发布前沿用共享整理表。独立刷新工具可用 `--source` 指定整理表；生成器的 `--input` 只切换订单输入 |
+| 小订与首销 | `../工作台数据/database/vehicle-config/campaigns/campaigns.sqlite3` | 只读车型配置中已发布的数据。首次使用前在车型配置完成发布。设置 `PLANHUB_DATA_ROOT` 可更换数据根，`VEHICLE_CONFIG_CAMPAIGN_DB` 可直接指定数据库路径。历史重放可用 `--source` 指定工作簿或已发布 JSON，或用 `VEHICLE_CONFIG_CAMPAIGN_SNAPSHOT` 指定快照。生成器的 `--input` 只切换订单输入 |
 | 车型资料 | `../工作台数据/shared/车型信息/` | 跟随共享根，已维护的车型属性优先取整理表 |
 | 派生销量汇总 | `../工作台数据/shared/订单汇总/鸿蒙智行销量数据汇总.xlsx` | 跟随共享根，独立刷新工具支持 `--output` |
 | 静态 HTML 与日志 | `output_file/static/鸿蒙智行销量预测.html`、同级 `log/` | 生成器 `--output`、`--log-dir` |

@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from core.campaign_source import edition_signature, is_edition, open_source, preferred_source
+from core.campaign_source import campaign_batch, edition_signature, is_edition, open_source, preferred_source, source_available
 from core.data_paths import orders_input_directory
 
 
@@ -94,10 +94,11 @@ def has_reservation(record: dict, *, modern=True) -> bool:
 
 def stage_records(path) -> list[dict]:
     source = Path(path)
-    if not source.exists():
+    if not source_available(source):
         return []
     if is_edition(source):
-        return _stage_records(*edition_signature(source))
+        with campaign_batch(source):
+            return _stage_records(*edition_signature(source))
     stat = source.stat()
     return _stage_records(str(source.resolve()), stat.st_mtime_ns, stat.st_size)
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 from datetime import date
 import hashlib
 import http.client
@@ -10,6 +10,7 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,6 +22,7 @@ from urllib.parse import quote
 from urllib.error import URLError
 
 from core import live_server
+from core.campaign_source import CampaignNotPublished
 from core.data_paths import FORECAST_SUMMARY_NAME
 from core.live_server import ForecastServer, InputSnapshot, LiveMonitor, scan_inputs
 from core.renderer import FORECAST_PAGE_NAME
@@ -56,7 +58,16 @@ class InputSnapshotTests(TestCase):
         self.models.mkdir(parents=True)
         self.config.parent.mkdir(parents=True)
         self.config.write_text("{}", encoding="utf-8")
-        environment = patch.dict(os.environ, {"SHARED_DATA_ROOT": ""})
+        data_root = self.root / "工作台数据"
+        self.database = data_root / "database/vehicle-config/campaigns/campaigns.sqlite3"
+        self.database.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute("CREATE TABLE draft (id INTEGER, published_revision INTEGER, data TEXT)")
+            db.execute("CREATE TABLE publications (revision INTEGER PRIMARY KEY, data TEXT)")
+            db.execute("INSERT INTO draft VALUES (1,1,'')")
+            db.execute("INSERT INTO publications VALUES (1,?)", (json.dumps({"sheets": [{"name": "车型汇总"}]}),))
+        environment = patch.dict(os.environ, {"SHARED_DATA_ROOT": "", "PLANHUB_DATA_ROOT": str(data_root),
+                                              "VEHICLE_CONFIG_CAMPAIGN_SNAPSHOT": ""})
         environment.start()
         self.addCleanup(environment.stop)
 
@@ -72,11 +83,22 @@ class InputSnapshotTests(TestCase):
         self.assertEqual(result.day, date.today().isoformat())
         self.assertIsInstance(result.files, tuple)
         self.assertEqual({Path(row[0]).name for row in result.files},
-                         {"订单.xlsx", "小订及首销数据整理.xlsx", "车型基本信息.xlsx", "config.json"})
+                         {"订单.xlsx", "campaigns.sqlite3", "车型基本信息.xlsx", "config.json"})
         self.assertTrue(all(isinstance(row, tuple) and len(row) == 3 for row in result.files))
         self.assertEqual(result, self.scan())
         with self.assertRaises(dataclasses.FrozenInstanceError):
             result.day = "2026-11-12"
+
+    def test_monitor_observes_publication_but_ignores_draft_and_legacy(self):
+        first = self.scan()
+        (self.references / "小订及首销数据整理.xlsx").touch()
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute("UPDATE draft SET data='draft only'")
+        self.assertEqual(self.scan(), first)
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute("INSERT INTO publications SELECT 2,data FROM publications WHERE revision=1")
+            db.execute("UPDATE draft SET published_revision=2")
+        self.assertNotEqual(self.scan(), first)
 
     def test_added_deleted_and_changed_workbooks_change_the_snapshot(self):
         first = self.scan()
@@ -588,6 +610,21 @@ class ForecastHTTPTests(TestCase):
         self.assertEqual(pages[0], pages[1])
         self.build.assert_not_called()
 
+    def test_pending_campaign_is_public_and_retries_without_exposing_exception_details(self):
+        self.monitor.scan = Mock(side_effect=CampaignNotPublished("private path"))
+        self.monitor.tick()
+        status = json.loads(self.get("/api/status")[2])
+        self.assertEqual(status["state"], "awaiting_publication")
+        self.assertEqual(status["refresh_reason"], CampaignNotPublished.message)
+        self.assertEqual(status["error"], "")
+        self.assertNotIn("private path", json.dumps(status))
+        self.assertIn(CampaignNotPublished.message.encode(), self.get("/")[2])
+        self.assertEqual(self.get("/readyz")[0], 503)
+        self.monitor.scan = lambda: snapshot()
+        self.clock.advance(self.monitor.scan_interval)
+        self.monitor.tick()
+        self.assertNotEqual(self.monitor.status()["state"], "awaiting_publication")
+
     def test_unbuilt_page_waits_while_readiness_distinguishes_missing_data(self):
         status, _, waiting = self.get("/")
         self.assertEqual(status, 200)
@@ -802,6 +839,9 @@ assert.equal(current.labels.length,1);
 current.queue.push(reply('published', true, {previous_result: true, state: 'error'}));
 await current.poll();
 assert.match(current.labels[0].textContent,/后台数据刷新失败.*重试/);
+current.queue.push(reply('published', true, {previous_result: true, state: 'awaiting_publication'}));
+await current.poll();
+assert.match(current.labels[0].textContent,/等待小订与首销首次发布/);
 current.queue.push(reply('published', true, {previous_result: false, state: 'ready'}));
 await current.poll();
 assert.equal(current.labels.length,0);

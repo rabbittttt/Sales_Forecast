@@ -24,7 +24,7 @@ from core.data_paths import orders_input_directory, assert_output_is_private, fo
 from core.discovery import discover_subjects, set_capabilities
 from core.excel import WorkbookStore, reset_conflict_diagnostics
 from core.forecast_summary import SUMMARY_NAME, visible_target_names
-from core.campaign_source import preferred_source
+from core.campaign_source import campaign_batch, preferred_source, published_path
 from core.model_identity import FORECAST_SOURCE_PATH
 from core.renderer import render_dashboard, forecast_manifest
 from core.validation import validate_manifest
@@ -125,6 +125,8 @@ def refresh_sales_forecast_data(config: dict[str, Any], input_dir: Path | None =
     child_env["PYTHONIOENCODING"] = "utf-8"
     child_env["PYTHONUTF8"] = "1"
     command = [sys.executable, "-u", str(script)]
+    if config.get("campaign_revision") is not None:
+        command.extend(["--campaign-revision", str(config["campaign_revision"])])
     if config.get("force_sales_forecast_data_refresh"):
         command.append("--force")
     if LOGGER.isEnabledFor(logging.DEBUG):
@@ -245,12 +247,24 @@ def build(
     input_dir: Path, output_file: Path, *, disable_sales_forecast: bool = False,
     force_refresh: bool = False, reuse_summary_only: bool = False,
 ) -> tuple[dict[str, Any], list[str]]:
+    if disable_sales_forecast:
+        return _build(input_dir, output_file, disable_sales_forecast=True, force_refresh=force_refresh,
+                      reuse_summary_only=reuse_summary_only)
+    with campaign_batch(published_path(PROJECT_ROOT)) as revision:
+        return _build(input_dir, output_file, campaign_revision=revision, force_refresh=force_refresh,
+                      reuse_summary_only=reuse_summary_only)
+
+
+def _build(input_dir, output_file, *, disable_sales_forecast=False, campaign_revision=None,
+           force_refresh=False, reuse_summary_only=False):
     build_started = perf_counter()
     assert_output_is_private(output_file)
     LOGGER.info("开始生成独立销量预测看板")
     LOGGER.info("输入目录: %s", input_dir)
     LOGGER.info("输出文件: %s", output_file)
     config = load_config(ROOT / "config.json")
+    if campaign_revision is not None:
+        config["campaign_revision"] = campaign_revision
     if force_refresh:
         config["refresh_sales_forecast_data_before_build"] = True
         config["force_sales_forecast_data_refresh"] = True

@@ -24,9 +24,12 @@ def published_path(project_root=PROJECT_ROOT):
     explicit = os.environ.get("VEHICLE_CONFIG_CAMPAIGN_SNAPSHOT", "").strip()
     if explicit:
         return (root / Path(explicit).expanduser()).resolve()
+    database = os.environ.get("VEHICLE_CONFIG_CAMPAIGN_DB", "").strip()
+    if database:
+        return (root / Path(database).expanduser()).resolve()
     data = os.environ.get("PLANHUB_DATA_ROOT", "").strip()
     base = (root / data).resolve() if data else root.parent / "工作台数据"
-    return base / "database" / "vehicle-config" / "campaigns" / "published.json"
+    return base / "database" / "vehicle-config" / "campaigns" / "campaigns.sqlite3"
 
 
 def preferred_source(path, project_root=PROJECT_ROOT):
@@ -35,51 +38,86 @@ def preferred_source(path, project_root=PROJECT_ROOT):
     active = _active.get()
     if active is not None:
         return active[0]
-    published = published_path(project_root)
-    if published.is_file():
-        return published
-    if os.environ.get("VEHICLE_CONFIG_CAMPAIGN_SNAPSHOT", "").strip():
-        raise FileNotFoundError(f"找不到指定的小订与首销发布快照：{published}")
-    # After cutover the old workbook may still be present as a historical copy.
-    database = published.with_name("campaigns.sqlite3")
-    if database.is_file():
-        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
-            migrated = db.execute("SELECT 1 FROM publications WHERE revision > 0 LIMIT 1").fetchone()
-        if migrated:
-            if published.is_file():
-                return published
-            raise FileNotFoundError(f"小订与首销已发布，缺失报表快照，请在车型配置重新载入以恢复：{published}")
-    return path
+    return published_path(project_root)
 
 
 def is_edition(path):
-    return isinstance(path, (str, Path)) and Path(path).suffix.lower() == ".json"
+    return isinstance(path, (str, Path)) and Path(path).suffix.lower() in {".json", ".sqlite3", ".sqlite", ".db"}
 
 
-def _read(path):
+class CampaignNotPublished(ValueError):
+    message = "小订与首销尚未发布，请在车型配置中核对草稿并完成首次发布。"
+
+
+
+def source_available(path):
+    """Optional lookups for standalone order workbooks can run before the first campaign publication."""
     path = Path(path).resolve()
+    if not path.is_file():
+        return False
+    if not is_edition(path) or path.suffix.lower() == ".json":
+        return True
     active = _active.get()
     if active is not None and active[0] == path:
-        return active
-    raw = path.read_bytes()
+        return True
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
+        return db.execute("SELECT 1 FROM draft WHERE id=1 AND published_revision > 0").fetchone() is not None
+
+
+def _database_edition(path, revision):
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
+        if revision is None:
+            row = db.execute("""
+                SELECT p.revision, p.data FROM draft d
+                JOIN publications p ON p.revision = d.published_revision
+                WHERE d.id = 1 AND p.revision > 0
+            """).fetchone()
+        else:
+            row = db.execute("SELECT revision, data FROM publications WHERE revision = ? AND revision > 0",
+                             (revision,)).fetchone()
+    if row is None:
+        if revision is not None:
+            raise ValueError(f"找不到指定的小订与首销发布版本 {revision}：{path}")
+        raise CampaignNotPublished(CampaignNotPublished.message)
+    published_revision, raw = row
     payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError(f"无效的小订与首销发布数据：{path}")
+    return {**payload, "schemaVersion": 1, "revision": published_revision}, raw.encode("utf-8")
+
+
+def _read(path, revision=None):
+    path = Path(path).resolve()
+    active = _active.get()
+    if active is not None and active[0] == path and (revision is None or active[1]["revision"] == revision):
+        return active
+    if not path.is_file():
+        raise FileNotFoundError(f"找不到小订与首销发布数据：{path}，请核对车型配置数据目录及发布状态。")
+    if path.suffix.lower() != ".json":
+        payload, raw = _database_edition(path, revision)
+    else:
+        raw = path.read_bytes()
+        payload = json.loads(raw)
     if (not isinstance(payload, dict) or payload.get("schemaVersion") != 1
             or type(payload.get("revision")) is not int or payload["revision"] < 1
             or not isinstance(payload.get("sheets"), list) or not payload["sheets"]
             or payload["sheets"][0].get("name") != "车型汇总"):
         raise ValueError(f"无效的小订与首销发布数据：{path}")
+    if revision is not None and payload["revision"] != revision:
+        raise ValueError(f"小订与首销快照修订已变化，请重试：{path}")
     return path, payload, hashlib.sha256(raw).hexdigest()
 
 
 @contextmanager
-def campaign_batch(path):
+def campaign_batch(path, revision=None):
     """Multiple stages of one forecast must read exactly the same published revision."""
-    if not is_edition(path):
-        yield
-        return
-    token = _active.set(_read(path))
+    if is_edition(path):
+        selected = _read(path, revision)
+    else:
+        selected = (Path(path).resolve(), None, None)
+    token = _active.set(selected)
     try:
-        yield
+        yield selected[1]["revision"] if selected[1] else None
     finally:
         _active.reset(token)
 

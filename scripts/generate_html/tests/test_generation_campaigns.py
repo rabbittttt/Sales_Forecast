@@ -94,6 +94,7 @@ class GenerationCampaignTests(TestCase):
         mix.close();cancel.close()
 
     def test_default_source_paths_share_configured_input_directory(self):
+        from core.campaign_source import published_path
         from core.data_paths import orders_input_directory
         from modules.sales_forecast import RAW_FORECAST_DATA, HISTORY_CANDIDATES, MODEL_MAPPING_CANDIDATES
         from tools.refresh_sales_forecast_data import parse_args
@@ -108,11 +109,11 @@ class GenerationCampaignTests(TestCase):
         self.assertEqual(MODEL_MAPPING_CANDIDATES[0], expected)
         with patch('sys.argv', ['refresh_sales_forecast_data.py']):
             args = parse_args()
-        self.assertEqual(args.source, expected)
+        self.assertEqual(args.source, published_path(project_root))
         self.assertEqual(args.mapping, expected)
         with patch('core.model_identity.stage_records', return_value=[]) as reader:
             generation_records()
-        reader.assert_called_once_with(expected)
+        reader.assert_called_once_with(published_path(project_root))
 
     def make_source(self, root):
         source = root / '小订及首销数据整理.xlsx'

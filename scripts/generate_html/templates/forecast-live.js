@@ -45,7 +45,10 @@
       label.className = "forecast-refresh-status";
       (document.querySelector(".module-bar .top-actions") || toolbar).append(label);
     }
-    const message = state === "error" ? "后台数据刷新失败，等待重试" : "后台数据刷新中";
+    const message = ({
+      error: "后台数据刷新失败，等待重试",
+      awaiting_publication: "显示上次结果，等待小订与首销首次发布"
+    })[state] || "后台数据刷新中";
     if (label.textContent !== message) {
       label.textContent = message;
       label.title = message;
@@ -86,7 +89,7 @@
     }
     const status = latestStatus;
     const short = id => id ? String(id).slice(0, 12) : "—";
-    const states = {starting:"启动中", ready:"已就绪", building:"生成中", stabilizing:"等待文件稳定", waiting:"等待文件稳定", error:"失败，等待重试"};
+    const states = {starting:"启动中", ready:"已就绪", building:"生成中", stabilizing:"等待文件稳定", awaiting_publication:"等待小订与首销首次发布", waiting:"等待文件稳定", error:"失败，等待重试"};
     const diagnostic = [
       "后台状态　" + (states[status.state] || status.state || "—"),
       "刷新原因　" + (status.refresh_reason || "—"),

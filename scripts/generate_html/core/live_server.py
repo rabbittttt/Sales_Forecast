@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from core.live_versions import previous_published_page
 from core.external_imports import ImportConflict, ImportStore, valid_text
 from core.config import SUMMARY_REUSE_UNAVAILABLE, load_config
-from core.campaign_source import LEGACY_NAME, published_path
+from core.campaign_source import CampaignNotPublished, LEGACY_NAME, edition_signature, published_path
 from core.data_paths import (
     FORECAST_SUMMARY_NAME, PROJECT_ROOT, forecast_reference_directory,
     model_information_directory,
@@ -50,7 +50,7 @@ def scan_inputs(input_dir: Path, project_root: Path = PROJECT_ROOT) -> InputSnap
         with os.scandir(root) as entries:
             for entry in entries:
                 name = entry.name
-                if name.startswith(("~$", ".")) or name == FORECAST_SUMMARY_NAME or not name.lower().endswith(".xlsx"):
+                if name.startswith(("~$", ".")) or name in {FORECAST_SUMMARY_NAME, LEGACY_NAME} or not name.lower().endswith(".xlsx"):
                     continue
                 try:
                     info = entry.stat()
@@ -63,10 +63,8 @@ def scan_inputs(input_dir: Path, project_root: Path = PROJECT_ROOT) -> InputSnap
                     path = path.resolve()
                 workbooks[path] = (info.st_size, info.st_mtime_ns)
     edition = published_path(project_root)
-    if edition.is_file():
-        workbooks.pop(forecast_reference_directory(project_root).resolve() / LEGACY_NAME, None)
-        payload = edition.read_bytes()
-        workbooks[edition] = (len(payload), int.from_bytes(hashlib.sha256(payload).digest(), "big"))
+    _, revision, digest = edition_signature(edition)
+    workbooks[edition] = (revision, int(digest, 16))
     config_path = Path(project_root) / "scripts" / "generate_html" / "config.json"
     config = load_config(config_path)
     # The release directory/mtime can change on deployment with identical config.
@@ -88,7 +86,7 @@ def _input_changes(old: InputSnapshot, new: InputSnapshot) -> tuple[str, bool]:
         reasons.append(f"业务日期由 {old.day} 变为 {new.day}")
     if any(Path(name).name == "config.json" for name in changed):
         reasons.append("预测配置变化")
-    if any(Path(name).suffix.lower() == ".json" and Path(name).name != "config.json" for name in changed):
+    if any(Path(name).suffix.lower() in {".sqlite3", ".json"} and Path(name).name != "config.json" for name in changed):
         reasons.append("小订与首销发布数据变化")
     workbooks = [Path(name).stem for name in changed if Path(name).suffix.lower() == ".xlsx"]
     if workbooks:
@@ -227,8 +225,13 @@ class LiveMonitor:
         except Exception as exc:
             self._pending = None
             self._next_scan = self.clock() + self.scan_interval
-            self._set_state("error", str(exc))
-            LOGGER.exception("动态更新失败，保留上次成功页面，下一轮重新检查")
+            if isinstance(exc, CampaignNotPublished):
+                if self.status()["state"] != "awaiting_publication":
+                    LOGGER.info(CampaignNotPublished.message)
+                self._set_state("awaiting_publication", reason=CampaignNotPublished.message)
+            else:
+                self._set_state("error", str(exc))
+                LOGGER.exception("动态更新失败，保留上次成功页面，下一轮重新检查")
         finally:
             self._tick_lock.release()
 
@@ -397,7 +400,7 @@ class ForecastHandler(BaseHTTPRequestHandler):
         if path in ("/healthz", "/readyz"):
             state = self.server.monitor.status()
             ready = bool(state["revision"])
-            healthy = ready and state["state"] != "error"
+            healthy = ready and state["state"] not in {"error", "awaiting_publication"}
             data = json.dumps({"ok": True, "app": "sales-forecast-live",
                                "ready": ready, "state": state["state"], "public_prefix": prefix}).encode("utf-8")
             self._send(data, "application/json; charset=utf-8",
@@ -417,8 +420,10 @@ class ForecastHandler(BaseHTTPRequestHandler):
             content, revision = self.server.monitor.page()
             status = self.server.monitor.status()
             if content is None:
-                message = ("销量预测生成失败，后台将自动重试。" if status["state"] == "error"
-                           else "正在生成销量预测…")
+                message = {
+                    "error": "销量预测生成失败，后台将自动重试。",
+                    "awaiting_publication": CampaignNotPublished.message,
+                }.get(status["state"], "正在生成销量预测…")
                 waiting = (
                     '<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
                     '<meta name="viewport" content="width=device-width, initial-scale=1">'

@@ -16,7 +16,7 @@ from core.data_paths import (
 
 
 class SharedDataPathsTests(TestCase):
-    def test_source_candidates_exclude_backups_and_require_an_unambiguous_choice(self):
+    def test_missing_source_never_picks_another_workbook(self):
         from tools.refresh_sales_forecast_data import resolve_source_path
 
         with TemporaryDirectory() as directory:
@@ -28,7 +28,8 @@ class SharedDataPathsTests(TestCase):
                 resolve_source_path(requested)
             candidate = root / "新版小订数据整理.xlsx"
             candidate.touch()
-            self.assertEqual(resolve_source_path(requested), candidate)
+            with self.assertRaises(FileNotFoundError):
+                resolve_source_path(requested)
             (root / "另一个首销数据整理.xlsx").touch()
             with self.assertRaises(FileNotFoundError):
                 resolve_source_path(requested)

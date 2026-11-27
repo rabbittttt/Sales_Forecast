@@ -16,7 +16,7 @@ from core.forecast_calendar import (
 )
 from core.china_calendar import calendar_payload
 from core.forecast_headers import launch_end_value
-from core.campaign_source import is_edition, preferred_source
+from core.campaign_source import is_edition, preferred_source, source_available
 from core.data_paths import forecast_summary_path, forecast_reference_directory, model_information_directory
 from core.model_identity import model_key, model_alias_keys, aggregate_generation_name, usable_attribute, stage_records, stage_name, parent_generation, stage_label, resolve_stage_identity, generation_records, has_reservation, FORECAST_SOURCE_PATH
 from core.excel import cell_source_text, join_source_texts, covered_date_source_text, _source_date_ranges, display_period, grain_from_sheet, is_aggregate_generation, parse_metric_sheet, sheet_subject, subject_type, compact_diagnostic_ranges
@@ -161,12 +161,14 @@ def _primary_attributes(master):
 
 def _read_model_master(path: Path | None = None) -> dict[str, dict[str, Any]]:
     active = ACTIVE_SUMMARY.get()
-    source = path or (active["path"] if active else preferred_source(RAW_FORECAST_DATA) if stage_records(preferred_source(RAW_FORECAST_DATA)) else MODEL_MASTER_PATH)
+    source = path or (active["path"] if active else preferred_source(RAW_FORECAST_DATA))
+    if path is None and not active and not is_edition(source) and not stage_records(source):
+        source = MODEL_MASTER_PATH
     modern = [] if active and Path(source) == active["path"] else stage_records(source)
     if modern:
         result = {model_key(stage_name(r)): r for r in modern}
         return _primary_attributes(result)
-    if not source.exists():
+    if not source_available(source):
         return {}
     workbook = open_input(source, read_only=True, data_only=True)
     try:
@@ -210,8 +212,8 @@ def _read_model_mapping() -> dict[str, str]:
         if "mapping" not in active:
             active["mapping"] = _read_model_mapping_file.__wrapped__(active["path"])
         return active["mapping"]
-    mapping_path = next((path for path in map(preferred_source, MODEL_MAPPING_CANDIDATES) if path.exists()), None)
-    if mapping_path is None:
+    mapping_path = next((path for path in map(preferred_source, MODEL_MAPPING_CANDIDATES) if is_edition(path) or path.exists()), None)
+    if mapping_path is None or not source_available(mapping_path):
         return {}
     if is_edition(mapping_path):
         return _read_model_mapping_file.__wrapped__(mapping_path)
@@ -277,7 +279,7 @@ def _integrated_master_sheet(workbook):
 def _read_stage_windows() -> tuple[Path | None, dict[str, dict[str, Any]]]:
     """Read absolute small-order and launch windows, normalized to order-analysis generation names."""
     source = input_path(RAW_FORECAST_DATA)
-    if not source.exists():
+    if not source_available(source):
         return None, {}
     workbook = open_input(source, read_only=True, data_only=True)
     try:
@@ -360,7 +362,7 @@ def _read_small_order_history(path: Path | None = None, *, today: date | None = 
     """Read observed daily reservations and preserve independently known summary totals."""
     as_of = (today or date.today()).isoformat()
     source = path or input_path(RAW_FORECAST_DATA)
-    if not source.exists():
+    if not source_available(source):
         return None, []
     workbook = open_input(source, read_only=False, data_only=True)
     try:
@@ -1070,8 +1072,8 @@ def _history_item(record: dict[str, Any], processed: bool) -> dict[str, Any]:
 
 
 def _read_history() -> tuple[Path | None, list[dict[str, Any]]]:
-    path = input_path(next((candidate for candidate in map(preferred_source, HISTORY_CANDIDATES) if candidate.exists()), None))
-    if path is None:
+    path = input_path(next((candidate for candidate in map(preferred_source, HISTORY_CANDIDATES) if is_edition(candidate) or candidate.exists()), None))
+    if path is None or (is_edition(path) and not source_available(path)):
         return None, []
     workbook = open_input(path, read_only=False, data_only=True)
     try:

@@ -38,7 +38,7 @@ from core.model_identity import model_key, usable_attribute, stage_records, stag
 from core.forecast_summary import SUMMARY_NAME, INDEX_SHEET, GUIDE_SHEET, DAILY_SHEET, WEEKLY_SHEET, D12_SHEET, D12_HEADERS, public_forecast_tables, summary_scope, summary_quality, table_records, iso_day
 from core.forecast_summary import GROSS_DAILY_SHEET, GROSS_PROGRESS_SHEET, LAUNCH_CANCEL_SHEET, LAUNCH_CANCEL_DAILY_SHEET, SMALL_CANCEL_SHEET, SMALL_CANCEL_DAILY_SHEET
 from core.excel import WorkbookItem, _source_date_range, grain_from_sheet, load_data_workbook, compact_diagnostic_ranges, reset_conflict_diagnostics
-from core.campaign_source import campaign_batch, edition_signature, is_edition, open_source, preferred_source
+from core.campaign_source import campaign_batch, edition_signature, is_edition, open_source, published_path
 from core.data_paths import (orders_input_directory, model_information_directory,
                              forecast_summary_path, excel_cache_directory, assert_output_is_private,
                              assert_summary_output)
@@ -1712,23 +1712,7 @@ def summary_is_current(source, output, mapping, orders_dir, as_of_date):
 def resolve_source_path(requested: Path) -> Path:
     if requested.exists():
         return requested
-    candidates = [
-        path for path in requested.parent.glob("*.xlsx")
-        if path.is_file() and not path.name.startswith("~$")
-        and not any(marker in path.name for marker in ("副本", "修正前", *ORDER_FILE_KEYWORDS))
-        and "二次处理" not in path.name
-        and "映射" not in path.name
-        and ("小订" in path.name or "首销" in path.name)
-    ]
-    preferred = [path for path in candidates if "数据整理" in path.name]
-    pool = preferred or candidates
-    if len(pool) == 1:
-        LOGGER.info("[来源选择] 默认原始文件名不存在，使用同目录唯一候选：%s", pool[0].name)
-        return pool[0]
-    raise FileNotFoundError(
-        f"找不到原始历史文件：{requested}；同目录候选："
-        + ("、".join(path.name for path in pool) if pool else "无")
-    )
+    raise FileNotFoundError(f"找不到小订与首销来源：{requested}，请核对数据目录或显式指定的来源文件。")
 
 
 def output_is_current(source: Path, output: Path, mapping: Path) -> bool:
@@ -1741,7 +1725,9 @@ def output_is_current(source: Path, output: Path, mapping: Path) -> bool:
                 return False
         output_time = output.stat().st_mtime_ns
         dependencies = (source, mapping)
-        return all(path.exists() and path.stat().st_mtime_ns <= output_time for path in dependencies)
+        # Draft edits change SQLite mtimes. The workbook signature checks the published revision and data.
+        return all(path.exists() and (is_edition(path) or path.stat().st_mtime_ns <= output_time)
+                   for path in dependencies)
     except OSError:
         return False
 
@@ -1750,8 +1736,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="汇总小订、首销、平销历史及当前真实订单")
     parser.add_argument("--orders", type=Path, default=DEFAULT_ORDERS, help="当前订单Excel目录")
     parser.add_argument("--as-of-date", default="", help="复盘日期YYYY-MM-DD，默认运行当天")
-    parser.add_argument("--source", type=Path, default=preferred_source(DEFAULT_SOURCE), help="历史发布快照或原始工作簿")
+    parser.add_argument("--source", type=Path, default=published_path(), help="小订与首销数据库、历史发布快照或原始工作簿")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="二次处理输出文件")
+    parser.add_argument("--campaign-revision", type=int, help="读取指定的已发布修订")
     parser.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING, help="默认从整理表第一个Sheet读取代际名、二级代际名和属性；显式指定时兼容旧映射文件")
     parser.add_argument("--force", action="store_true", help="忽略文件时间，强制重新生成二次处理文件")
     parser.add_argument("--debug", action="store_true", help="显示全部来源、冲突位置和诊断明细")
@@ -1792,29 +1779,34 @@ def main() -> int:
         LOGGER.debug("原始历史文件: %s", args.source)
         LOGGER.debug("车型基本信息: %s", args.mapping)
         LOGGER.debug("二次处理输出: %s", args.output)
-        ensure_mapping(args.mapping, args.source)
-        if not args.force and summary_is_current(args.source, args.output, args.mapping, args.orders, args.as_of_date):
-            # read_only defers cell parsing. A readable workbook header does not
-            # guarantee its cached daily tables can actually be consumed.
-            audit_day = date.fromisoformat(args.as_of_date) if args.as_of_date else date.today()
-            try:
-                with args.output.open("rb") as handle:
-                    book = load_workbook(handle, read_only=True, data_only=True)
-                    try:
-                        audit_final_forecast(book, audit_day)
-                    finally:
-                        book.close()
-            except SUMMARY_FORMAT_ERRORS as exc:
-                LOGGER.warning("[销量汇总损坏] 文件=%s | %s: %s | 处理=从原始来源重新生成",
-                               args.output, type(exc).__name__, exc)
-            else:
-                LOGGER.info("销量数据汇总已是最新，跳过刷新：%s", args.output)
-                return 0
-        build_secondary(args.source, args.output, args.mapping, args.orders, args.as_of_date)
-        return 0
+        with campaign_batch(args.source, getattr(args, "campaign_revision", None)):
+            return refresh_selected(args)
     except Exception:
         LOGGER.exception("刷新失败")
         return 1
+
+
+def refresh_selected(args):
+    ensure_mapping(args.mapping, args.source)
+    if not args.force and summary_is_current(args.source, args.output, args.mapping, args.orders, args.as_of_date):
+        # read_only defers cell parsing. A readable workbook header does not
+        # guarantee its cached daily tables can actually be consumed.
+        audit_day = date.fromisoformat(args.as_of_date) if args.as_of_date else date.today()
+        try:
+            with args.output.open("rb") as handle:
+                book = load_workbook(handle, read_only=True, data_only=True)
+                try:
+                    audit_final_forecast(book, audit_day)
+                finally:
+                    book.close()
+        except SUMMARY_FORMAT_ERRORS as exc:
+            LOGGER.warning("[销量汇总损坏] 文件=%s | %s: %s | 处理=从原始来源重新生成",
+                           args.output, type(exc).__name__, exc)
+        else:
+            LOGGER.info("销量数据汇总已是最新，跳过刷新：%s", args.output)
+            return 0
+    build_secondary(args.source, args.output, args.mapping, args.orders, args.as_of_date)
+    return 0
 
 
 if __name__ == "__main__":
