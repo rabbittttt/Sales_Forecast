@@ -202,7 +202,8 @@ class PublicForecastTablesTests(TestCase):
         book = self.make_public()
         profiles, windows, small, _ = read_public_forecast(book, [])
         self.assertEqual(small[0]['daily_orders'], [0, 10])
-        self.assertEqual(small[0]['standard_progress'], [0, .1])
+        self.assertEqual(small[0]['small_progress'], [0, .1])
+        self.assertNotIn('standard_progress', small[0])
         self.assertEqual(small[0]['small_hourly_curve'], [])
         self.assertEqual(profiles[0]['days'][0]['gross'], 30)
         self.assertEqual(profiles[0]['small_hourly_days'][0]['hours'][0]['hour'], 15)
@@ -389,11 +390,25 @@ class PublicForecastTablesTests(TestCase):
         self.assertEqual(item['small_progress'], [0, None])
         self.assertTrue(item['total_complete'])  # Explicit maintained total 100 is not erased by a partial source.
         self.assertEqual(item['total'], 100)
-        # The known standard curve remains usable; it must not be materialized
-        # as a fabricated quantity for the missing real day.
         self.assertIsNone(table_records(book, SMALL_DAILY_SHEET)[0]['D2'])
-        self.assertEqual(len(item['standard_progress']), 4)
+        self.assertIsNone(table_records(book, SMALL_CURVE_SHEET)[0]['D2'])
+        self.assertNotIn('standard_progress', item)
         book.close()
+
+    def test_reported_total_survives_open_or_undated_window_without_becoming_a_reference(self):
+        for end in (datetime(2026, 2, 5), None):
+            with self.subTest(end=end):
+                book = self.make_public()
+                self.addCleanup(book.close)
+                master = book[MASTER_SHEET]
+                headers = [cell.value for cell in master[1]]
+                master.cell(2, headers.index('小订结束') + 1).value = end
+                master.cell(2, headers.index('小订参考总量有效') + 1).value = False
+                item = read_public_forecast(book, [], today=date(2026, 2, 1))[2][0]
+                self.assertEqual(item['reported_total'], 100)
+                self.assertFalse(item['total_complete'])
+                self.assertIsNone(item['d1_share'])
+                self.assertTrue(all(value is None for value in item['small_progress']))
 
     def test_synthetic_curve_is_not_exported_as_real_daily_orders(self):
         def customize(data):
@@ -402,14 +417,35 @@ class PublicForecastTablesTests(TestCase):
             item.pop('total_complete', None)
             data['actuals'][0]['small_daily_days'] = []
         book = self.make_public(customize=customize)
+        # Model an already-published workbook from before the retirement. All
+        # real day values are missing, while the legacy curve is fully filled.
+        curve = book[SMALL_CURVE_SHEET]
+        for column, value in enumerate((.333, 1), 3):
+            curve.cell(1, column).value = f'D{column - 2}'
+            curve.cell(2, column).value = value
+        master = book[MASTER_SHEET]
+        source_column = [cell.value for cell in master[1]].index('小订参考来源') + 1
+        master.cell(2, source_column).value = '小订进度'
         item = read_public_forecast(book, [])[2][0]
         self.assertEqual(item['total'], 100)
-        self.assertEqual(item['daily_orders'], [33, 67])
-        self.assertEqual(item['d1_share'], .333)
+        self.assertEqual(item['daily_orders'], [])
+        self.assertIsNone(item['d1_share'])
+        self.assertNotIn('standard_progress', item)
         self.assertFalse(item['daily_actual'])
         self.assertEqual(item['small_progress'], [])
         from core.forecast_summary import table_records
         self.assertFalse(any(r['小订数量'] is not None for r in table_records(book, DAILY_SHEET)))
+        headers = [cell.value for cell in master[1]]
+        master.cell(2, headers.index('小订参考总量有效') + 1).value = False
+        for total in (0, None):
+            with self.subTest(total=total):
+                master.cell(2, headers.index('总小订') + 1).value = total
+                item = read_public_forecast(book, [])[2][0]
+                self.assertEqual(item['total'], total)
+                self.assertFalse(item['daily_actual'])
+                self.assertEqual(item['daily_orders'], [])
+                self.assertEqual(item['small_progress'], [])
+                self.assertIsNone(item['d1_share'])
         book.close()
 
     def test_hourly_components_use_verified_daily_cells(self):

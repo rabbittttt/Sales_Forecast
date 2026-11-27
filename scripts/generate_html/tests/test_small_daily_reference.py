@@ -63,7 +63,7 @@ console.log(JSON.stringify(cases));
             self.assertTrue(case['same'])
             self.assertAlmostEqual(case['calendar'], case['expectedCalendar'])
 
-    def test_standard_curve_is_allowed_only_when_complete_and_no_actual_series(self):
+    def test_legacy_standard_curve_never_supplies_daily_quantity(self):
         result = self.js(r'''
 const curve=[.2,.4,.6,.8,1],base={days:5,standard_progress:curve};
 console.log(JSON.stringify({valid:m.adaptSmallDailyOrders(base,10),
@@ -72,9 +72,7 @@ console.log(JSON.stringify({valid:m.adaptSmallDailyOrders(base,10),
  unfinished:m.adaptSmallDailyOrders({...base,total_complete:false},10),
  zeros:m.adaptSmallDailyOrders({...base,daily_orders:[0,0,0,0,0]},10)}));
 ''')
-        self.assertEqual(len(result['valid']), 10)
-        self.assertAlmostEqual(sum(result['valid']), 1)
-        for key in ('short', 'gap', 'unfinished', 'zeros'):
+        for key in ('valid', 'short', 'gap', 'unfinished', 'zeros'):
             self.assertEqual(result[key], [])
 
     def test_invalid_primary_is_removed_before_weight_normalization(self):

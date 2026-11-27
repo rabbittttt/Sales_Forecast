@@ -21,7 +21,7 @@ from core.data_paths import forecast_summary_path, forecast_reference_directory,
 from core.model_identity import model_key, model_alias_keys, aggregate_generation_name, usable_attribute, stage_records, stage_name, parent_generation, stage_label, resolve_stage_identity, generation_records, has_reservation, FORECAST_SOURCE_PATH
 from core.excel import cell_source_text, join_source_texts, covered_date_source_text, _source_date_ranges, display_period, grain_from_sheet, is_aggregate_generation, parse_metric_sheet, sheet_subject, subject_type, compact_diagnostic_ranges
 from core.models import Dashboard, SourceRef, Subject
-from core.forecast_summary import ACTIVE_SUMMARY, SUMMARY_NAME, D12_SHEET, LEGACY_D12_SHEET, LAUNCH_CANCEL_SHEET, input_path, open_input, summary_scope, table_records, reservation_reference_shape
+from core.forecast_summary import ACTIVE_SUMMARY, SUMMARY_NAME, D12_SHEET, LEGACY_D12_SHEET, LAUNCH_CANCEL_SHEET, input_path, open_input, summary_scope, table_records
 
 
 LOGGER = logging.getLogger(__name__)
@@ -356,8 +356,9 @@ def _first_record_value(record: dict[str, Any], *names: str) -> Any:
     return next((record.get(name) for name in names if record.get(name) not in (None, "")), None)
 
 
-def _read_small_order_history(path: Path | None = None) -> tuple[Path | None, list[dict[str, Any]]]:
-    """Read actual by-day small-order curves; standardized progress is fallback evidence only."""
+def _read_small_order_history(path: Path | None = None, *, today: date | None = None) -> tuple[Path | None, list[dict[str, Any]]]:
+    """Read observed daily reservations and preserve independently known summary totals."""
+    as_of = (today or date.today()).isoformat()
     source = path or input_path(RAW_FORECAST_DATA)
     if not source.exists():
         return None, []
@@ -366,10 +367,9 @@ def _read_small_order_history(path: Path | None = None) -> tuple[Path | None, li
         if "小订by天" not in workbook.sheetnames:
             LOGGER.warning(
                 "[销量预测数据诊断] 文件=%s | 未找到'小订by天'Sheet | "
-                "处理=小订历史缺少真实逐日曲线，仅能按车型汇总回退合成，网页小订预测证据将受限",
+                "处理=小订历史缺少真实逐日曲线，保留车型汇总中已知的小订总量",
                 source.name,
             )
-            return source, []
         model_mapping = _read_model_mapping()
         model_master = _read_model_master()
         # A generation may contain multiple propagation events. Only aliases
@@ -400,12 +400,12 @@ def _read_small_order_history(path: Path | None = None) -> tuple[Path | None, li
                     record["_generation"] = _canonical_model(model, model_mapping)
                     summaries.append(record)
 
-        standardized = _progress_rows(workbook, "小订进度")
-        sheet = workbook["小订by天"]
+        sheet = workbook["小订by天"] if "小订by天" in workbook.sheetnames else None
         current_header: list[Any] = []
         parsed: dict[tuple[str, str], dict[str, Any]] = {}
         skip_labels = {"", "合计", "预测", "```", "小订"}
-        for row_number, values in enumerate(sheet.iter_rows(values_only=True), start=1):
+        daily_rows = sheet.iter_rows(values_only=True) if sheet is not None else ()
+        for row_number, values in enumerate(daily_rows, start=1):
             label = str(values[0] or "").strip() if values else ""
             if label in ("小订", "代际名"):
                 current_header = list(values)
@@ -534,11 +534,7 @@ def _read_small_order_history(path: Path | None = None) -> tuple[Path | None, li
             master_record = _master_record(model_master, label, generation) or {}
             summary_start = _iso(summary.get("小订开始日期"))
             summary_end = _iso(summary.get("小订结束日期"))
-            fallback_curve = next(
-                (curve for name, curve in standardized.items() if _same_model(name, label) or _same_model(name, generation)),
-                [],
-            )
-            summary_total = _optional_number(summary.get("总小订"))
+            summary_total = _optional_count([summary.get("总小订")], 0)
             if summary_total is not None and summary_total > 0 and (
                 (not partial_daily and abs(summary_total - total) > 1) or summary_total < daily_sum - 1
             ):
@@ -547,8 +543,9 @@ def _read_small_order_history(path: Path | None = None) -> tuple[Path | None, li
                     "处理=仅为整理表内部初读差异，最终按多来源优先级取值后再校验",
                     generation, int(round(summary_total)), total,
                 )
-            final_total = int(round(summary_total)) if summary_total is not None and summary_total > 0 else total
-            total_complete = not partial_daily or (summary_total is not None and summary_total > 0)
+            final_total = summary_total if summary_total is not None else total
+            known_total = summary_total if summary_total is not None else total if not partial_daily else None
+            total_complete = bool(summary_end and summary_end < as_of and known_total is not None)
             running = 0
             cumulative = []
             prefix_complete = True
@@ -560,6 +557,7 @@ def _read_small_order_history(path: Path | None = None) -> tuple[Path | None, li
                     min(running / final_total, 1)
                     if prefix_complete and total_complete and final_total > 0 else None
                 )
+            has_daily = any(value is not None for value in daily)
             item = {
                 "model": generation if modern_names else label,
                 "source_model": label,
@@ -574,18 +572,16 @@ def _read_small_order_history(path: Path | None = None) -> tuple[Path | None, li
                 "small_end_date": summary_end or (dates[-1] if dates else ""),
                 "days": max(int(_number(summary.get("小订天数"), len(daily))), len(daily), 1),
                 "total": final_total,
+                "reported_total": known_total,
                 "total_complete": total_complete,
-                "total_source": "车型汇总" if (summary_total or 0) > 0 else "小订by天合计" if total_complete else "小订by天已填累计（非终值）",
-                "daily_orders": daily,
-                "dates": dates,
-                "small_progress": cumulative,
-                "standard_progress": reservation_reference_shape(fallback_curve)["standard_progress"],
-                "d1_share": (
-                    daily[0] / final_total if daily and daily[0] is not None and total_complete else 0
-                ) if final_total > 0 else None,
+                "total_source": "车型汇总" if summary_total is not None else "小订by天合计" if not partial_daily else "小订by天已填累计（非终值）",
+                "daily_orders": daily if has_daily else [],
+                "dates": dates if has_daily else [],
+                "small_progress": cumulative if has_daily else [],
+                "d1_share": daily[0] / final_total if daily and daily[0] is not None and total_complete and final_total > 0 else None,
                 "small_hourly_curve": [],
-                "daily_actual": True,
-                "source_sheet": sheet.title,
+                "daily_actual": has_daily,
+                "source_sheet": "车型汇总" if not has_daily and summary_total is not None else sheet.title,
             }
             parsed[(_model_key(label), item["small_start_date"])] = item
         parsed_windows = {
@@ -599,24 +595,12 @@ def _read_small_order_history(path: Path | None = None) -> tuple[Path | None, li
                 continue
             model = str(summary.get("_model") or summary.get("二级代际名") or summary.get("代际名") or summary.get("车型") or summary.get("传播名") or "").strip()
             generation = _canonical_model(model, model_mapping)
-            total = int(round(_number(summary.get("总小订"))))
-            fallback_curve = next(
-                (curve for name, curve in standardized.items() if _same_model(name, model) or _same_model(name, generation)),
-                [],
-            )
-            if total <= 0:
+            total = _optional_count([summary.get("总小订")], 0)
+            if total is None:
                 continue
-            shape = reservation_reference_shape(fallback_curve, total)
-            daily = shape["daily_orders"]
-            start_date = _as_date(summary.get("小订开始日期"))
-            dates = [(start_date + timedelta(days=index)).isoformat() for index in range(len(daily))] if start_date else []
             master_record = _master_record(model_master, model, generation) or {}
-            LOGGER.debug(
-                "[销量预测估算] 代际=%s | 小订by天无真实逐日行 | "
-                "处理=按'小订进度'标准化曲线合成逐日形状（daily_actual=False），仅作历史参考形状",
-                model,
-            )
-            parsed[(_model_key(model), dates[0] if dates else "")] = {
+            summary_end = _iso(summary.get("小订结束日期"))
+            parsed[(_model_key(model), summary_start_key)] = {
                 "model": model,
                 "generation": generation,
                 "mapped": _model_key(model) in model_mapping,
@@ -626,18 +610,19 @@ def _read_small_order_history(path: Path | None = None) -> tuple[Path | None, li
                 "node": usable_attribute(master_record.get("发布类型") or master_record.get("发布节点")),
                 "launch_period": usable_attribute(master_record.get("小订发布时段")),
                 "small_start_date": _iso(summary.get("小订开始日期")),
-                "small_end_date": _iso(summary.get("小订结束日期")),
-                "days": max(int(_number(summary.get("小订天数"), len(daily))), len(daily), 1),
+                "small_end_date": summary_end,
+                "days": max(int(_number(summary.get("小订天数"), 1)), 1),
                 "total": total,
+                "reported_total": total,
+                "total_complete": bool(summary_end and summary_end < as_of),
                 "total_source": "车型汇总",
-                "daily_orders": daily,
-                "dates": dates,
+                "daily_orders": [],
+                "dates": [],
                 "small_progress": [],
-                "standard_progress": shape["standard_progress"],
-                "d1_share": shape["d1_share"],
+                "d1_share": None,
                 "small_hourly_curve": [],
                 "daily_actual": False,
-                "source_sheet": "小订进度",
+                "source_sheet": "车型汇总",
             }
         deduped: dict[tuple[str, str], dict[str, Any]] = {}
         for item in parsed.values():
@@ -2825,7 +2810,7 @@ class SalesForecastModule:
         stage_window_path, stage_windows = _read_stage_windows()
         raw_profiles, actual_sources = _read_actual_profiles(store, stage_windows, today=self.as_of_date)
         _attach_actual_shapes(history, raw_profiles, today=self.as_of_date)
-        small_history_path, small_history = _read_small_order_history()
+        small_history_path, small_history = _read_small_order_history(today=self.as_of_date)
         _attach_small_hourly_curves(small_history, raw_profiles, today=self.as_of_date)
         steady_history, steady_sources = _read_steady_history(
             store, stage_windows, today=self.as_of_date
@@ -2991,7 +2976,7 @@ class SalesForecastModule:
                 "小订D1已过：已发生累计小订除以主辅参考车型同Dn累计完成率反推最终总量；已结束日期冻结真实值。",
                 "未来小订使用独立主辅到天基础曲线，以前一完整真实日为衔接基准；先剔除历史日历影响，再应用目标日历系数并渐进分配差额。累计进度、到天基础、D1分时分别选择主辅及权重；额外图表对比车型只用于展示。",
                 "小订结束后保留明确维护的最终总小订；缺失时仅用其他来源的明确终值或完整真实日合计，不用转化率/退订率反推。真实日量继续遵守同一小订窗口的来源顺序。",
-                "逐日小订按整理表真实小订by天→小订选配比例代际by天→小订退订分析分时汇总逐字段取值；历史需同一小订开始日期及维护窗口。“小订进度”仅为参考形状，不补真实日量。",
+                "逐日小订按整理表真实小订by天→小订选配比例代际by天→小订退订分析分时汇总逐字段取值；历史需同一小订开始日期及维护窗口。",
             ],
             "steady_rules": [
                 "平销真实日只读取《锁单选配比例分析》的代际by天，完整周读取by周；指标固定为交车锁单，不再读取独立平销历史文件，也不再预测平销大定。",

@@ -322,7 +322,7 @@
 
   function smallReferenceAvailable(item={},task='progress') {
     if(task==='hourly')return smallHourlyStart(item)>=0&&smallHourlyCurve(item).some(Number.isFinite);
-    if(task==='slope')return dailySlope(item.daily_orders||[]).some(Number.isFinite);
+    if(task==='slope')return item.daily_actual!==false&&dailySlope(item.daily_orders||[]).some(Number.isFinite);
     return item.total_complete!==false&&Number(item.total)>0;
   }
 
@@ -399,7 +399,7 @@
   // A known terminal total does not make a partial daily history complete.
   // Do not replace missing actual days with a standardized curve or stretch a prefix.
   function adaptSmallDailyOrders(item = {}, targetDays, factor = () => 1) {
-    if (item.total_complete === false) return [];
+    if (item.total_complete === false || item.daily_actual === false) return [];
     const orders = item.daily_orders || [];
     let curve;
     if (orders.length) {
@@ -410,7 +410,7 @@
       let total = 0;
       curve = values.map(value => (total += value));
     } else {
-      const progress = (item.small_progress || []).some(Number) ? item.small_progress : item.standard_progress || [];
+      const progress = item.small_progress || [];
       if (progress.length !== Number(item.days || progress.length)) return [];
       curve = progress.map(observedQuantity);
     }

@@ -51,7 +51,7 @@ class SmallMaintainedCellTests(TestCase):
         item = self.read(['待更新', 30, 20])
         self.assertTrue(item['daily_actual'])
         self.assertEqual(item['daily_orders'], [None, 30, 20])
-        self.assertEqual(item['d1_share'], 0)
+        self.assertIsNone(item['d1_share'])
         self.assertEqual(item['small_progress'], [None, None, None])
 
     def test_real_zero_and_supported_count_strings_keep_priority(self):

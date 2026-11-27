@@ -205,13 +205,14 @@ class SalesForecastStageTests(unittest.TestCase):
             daily.append(["测试车", 50, 30, 20, 100])
             progress = workbook.create_sheet("小订进度")
             progress.append(["车型", "D1", "D2", "D3"])
-            progress.append(["测试车", .5, .8, 1])
+            progress.append(["测试车", .99, 1, 1])
             workbook.save(path)
             workbook.close()
             with patch("modules.sales_forecast._read_model_mapping", return_value={}), patch("modules.sales_forecast._read_model_master", return_value={}):
                 _, rows = _read_small_order_history(path)
         self.assertEqual(rows[0]["daily_orders"], [50, 30, 20])
         self.assertEqual(rows[0]["small_progress"], [.5, .8, 1])
+        self.assertNotIn("standard_progress", rows[0])
         self.assertEqual(rows[0]["d1_share"], .5)
 
     def test_small_order_history_preserves_distinct_propagation_events_of_same_generation(self):

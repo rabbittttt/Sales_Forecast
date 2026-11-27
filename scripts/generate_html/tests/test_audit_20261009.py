@@ -66,7 +66,9 @@ class SmallReferenceCalendarTests(TestCase):
 
     def test_only_today_does_not_become_a_completed_d1_reference(self):
         book = self.workbook([('2026-01-01', 99)], today=date(2026, 1, 1))
-        item = read_public_forecast(book, [], today=date(2026, 1, 1))[2][0]
+        profiles, _, history, _ = read_public_forecast(book, [], today=date(2026, 1, 1))
+        item = history[0]
         self.assertEqual(item['daily_orders'], [])
-        self.assertEqual(item['total'], 0)
-        self.assertTrue(item['daily_actual'])
+        self.assertIsNone(item['total'])
+        self.assertFalse(item['daily_actual'])
+        self.assertEqual(profiles[0]['small_daily_days'][0]['orders'], 99)

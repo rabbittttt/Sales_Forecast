@@ -64,7 +64,7 @@ console.log(JSON.stringify({ongoing:probe('2026-09-28',1000),pending:probe('2026
         self.assertFalse(data['invalid']['rawError'])
         self.assertFalse(data['invalid']['available'])
 
-    def test_active_small_initializes_and_predicts_without_current_final_total(self):
+    def render_small_workspace(self, scenario):
         script = r'''
 const fs=require('fs');
 const {smallReferenceScore,distributeInteger,completedSmallOrderDays,anchoredAllocate}=require(MATH);
@@ -74,7 +74,7 @@ const end=source.indexOf('  function bindSteadyForecast(',start);
 const nodes=new Map(),node=key=>{if(!nodes.has(key))nodes.set(key,{value:'',textContent:'',innerHTML:'',hidden:true});return nodes.get(key)};
 const select={value:'',options:[{value:'ref',dataset:{model:'reference'}}]},weight={value:'100'};
 const workspace={querySelector:node,querySelectorAll:key=>key==='[data-small-ref]'?[select]:key==='[data-small-weight]'?[weight]:[]};
-const root={querySelector:()=>workspace};
+const root={querySelector:key=>key==='[data-small-order-workspace]'?workspace:node(key)};
 const lifecycleUnavailable=(task,item)=>task==='hourly'&&!((item.small_hourly_curve||[]).some(value=>Number.isFinite(value)&&value>0));
 const status={};
 const setForecastStageSummary=(root,id,label,text)=>{status[id]={label,text}};
@@ -91,19 +91,41 @@ const reference={model:'reference',event_id:'ref',total:1000,days:4,tier:'SUV',e
 const actual={total_small:0,small_daily_days:[{date:'2026-09-01',orders:100},{date:'2026-09-02',orders:200},{date:'2026-09-03',orders:999}]};
 const calendarType=(start,index)=>({date:new Date(Date.parse(start+'T00:00:00Z')+index*86400000).toISOString().slice(0,10),type:'workday'});
 const planBridge=(stage,args)=>anchoredAllocate({...args,factors:args.dates.map(()=>1),weights:args.dates.map((_,i)=>i===0?0:i===1?.5:1)});
+const scenario=process.argv[1],ended=scenario!=='active';
 reference.small_start_date='2026-08-01';
-bindSmallOrderForecast(root,{small_order_history:[reference]},{sameModel:(a,b)=>a===b,targetState:()=>target,findActual:()=>actual,findStageActual:()=>actual,todayIso:()=> '2026-09-03',calendarType,planBridge,factors:()=>({workday:1,weekend:1,holiday:1})});
-console.log(JSON.stringify({status,total:node('[data-small-kpi="total"]').textContent,actual:node('[data-small-kpi="actual"]').textContent,error:node('[data-small-error]').textContent,hidden:node('[data-small-error]').hidden}));
+const history=[reference];
+if(ended){
+  actual.small_daily_days=[];
+  const reported=scenario==='ended-zero'?0:null;
+  history.push({model:target.name,small_start_date:target.smallStartDate,small_end_date:target.smallEndDate,
+    days:target.smallDays,reported_total:reported,total:reported,total_complete:false,daily_actual:false,total_source:'车型汇总'});
+}
+bindSmallOrderForecast(root,{small_order_history:history},{sameModel:(a,b)=>a===b,targetState:()=>target,
+  findActual:()=>actual,findStageActual:()=>actual,todayIso:()=>ended?'2026-09-06':'2026-09-03',
+  calendarType,planBridge,factors:()=>({workday:1,weekend:1,holiday:1})});
+const kpi=key=>node(`[data-small-kpi="${key}"]`).textContent;
+console.log(JSON.stringify({status,total:kpi('total'),actual:kpi('actual'),completion:kpi('completion'),error:node('[data-small-error]').textContent,hidden:node('[data-small-error]').hidden}));
 '''.replace('MATH', json.dumps(str(ROOT / 'templates/forecast-math.js'))).replace('DASHBOARD', json.dumps(str(ROOT / 'templates/dashboard.js')))
-        result = subprocess.run(['node','-e',script], capture_output=True, encoding='utf-8')
+        result = subprocess.run(['node', '-e', script, scenario], capture_output=True, encoding='utf-8')
         self.assertEqual(result.returncode, 0, result.stderr)
-        data = json.loads(result.stdout)
+        return json.loads(result.stdout)
+
+    def test_active_small_initializes_and_predicts_without_current_final_total(self):
+        data = self.render_small_workspace('active')
         # Today's 999 is not a complete real day, but the forecast cannot be lower.
         self.assertEqual(data['total'], '1299')
         self.assertEqual(data['actual'], '300')
         self.assertTrue(data['hidden'])
         self.assertIn('D3', data['status']['small']['label'])
         self.assertNotIn('判定中', data['status']['small']['label'])
+
+    def test_ended_kpis_distinguish_explicit_zero_from_unknown(self):
+        for scenario, expected, error_hidden in [('ended-zero', '0', True), ('ended-unknown', '—', False)]:
+            with self.subTest(scenario=scenario):
+                data = self.render_small_workspace(scenario)
+                self.assertEqual((data['total'], data['actual']), (expected, expected))
+                self.assertEqual(data['completion'], '—')
+                self.assertEqual(data['hidden'], error_hidden)
 
     def test_static_page_move_migrates_only_valid_same_project_file_state(self):
         script = r"""

@@ -1067,7 +1067,7 @@ def append_forecast_inputs(workbook, source, mapping_path, orders_dir, as_of_dat
             if kind == "订单":
                 source_ranges[path.name] = _source_date_range(WorkbookItem(path, book))
             for sheet in book.worksheets:
-                if kind == "历史" and sheet.title not in {"车型汇总", "小订by天", "小订进度"} and not (sheet is book.worksheets[0] and stage_records(path)):
+                if kind == "历史" and sheet.title not in {"车型汇总", "小订by天"} and not (sheet is book.worksheets[0] and sheet.title != "小订进度" and stage_records(path)):
                     continue
                 if kind == "映射" and stage_records(path):
                     if sheet is book.worksheets[0]:
@@ -1621,7 +1621,7 @@ def compact_source_sheets(workbook):
 
     def content_summary(kind, filename):
         if kind == "历史":
-            return "车型阶段汇总、小订逐日和小订进度"
+            return "车型阶段汇总和逐日小订"
         if kind == "映射":
             return "车型名称、别名和车型属性"
         if "小订退订分析" in filename:
@@ -1660,7 +1660,7 @@ def reorder_summary_sheets(workbook):
         "小转大当日数量", "直接大定当日数量", GROSS_DAILY_SHEET, LAUNCH_CANCEL_DAILY_SHEET,
         "小转大累计完成度", "直接大定累计完成度", GROSS_PROGRESS_SHEET, "累计小订转化率",
         "累计直接大定占比", "每日直接大定占比",
-        "车型汇总", "小订by天", "小订进度",
+        "车型汇总", "小订by天",
     ]
     existing = {sheet.title: sheet for sheet in workbook.worksheets}
     ordered = [existing[name] for name in dict.fromkeys(first) if name in existing]
