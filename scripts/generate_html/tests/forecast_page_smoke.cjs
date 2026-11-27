@@ -123,7 +123,14 @@ async function checkLayout(page, frame, {singleCampaign}) {
         const formulas = methodology.locator('.forecast-score-formula');
         assert.equal(await formulas.count(), stage === 'small' ? 2 : 1);
         for (const formula of await formulas.all()) assert(await formula.isVisible());
+        const candidateDetails = scores.locator('.forecast-score-detail-table .forecast-score-row-details');
+        assert.equal(await candidateDetails.locator('xpath=self::*[not(@open)]').count(), 0);
+        assert.equal(await scores.locator('.forecast-score-detail-table .forecast-score-part-rule').count(), 0);
         if (stage === 'small') {
+          const scopes = await scores.locator('.forecast-score-scope').allTextContents();
+          assert.equal(scopes.length, 2);
+          for (const ref of ['小订累计完成度','小订到天基础曲线','每日斜率（仅展示）']) assert(scopes[0].includes(ref));
+          assert(scopes[1].includes('D1 小订分时预测'));
           assert.deepEqual(await methodology.locator('h4').allTextContents(),
             await scores.locator('.forecast-score-detail h4').allTextContents());
         }
