@@ -80,8 +80,6 @@ async function run(){
       await page.locator('[data-forecast-nav="'+stage+'"]').click();
       await page.waitForSelector('[data-forecast-stage-pane="'+stage+'"].active');
       const views=['evidence','score','result'];
-      const stageName=await page.getByRole('navigation',{name:'预测阶段'}).locator('[aria-current="page"]').innerText();
-      check(stage+'内容标签属于当前阶段',await page.getByRole('tablist',{name:stageName+'内容'}).isVisible());
       check(stage+'仅提供结论、依据、打分三个视图',await page.locator('[data-forecast-tab="params"]').count()===0&&JSON.stringify(await page.locator('.forecast-target-tabs [data-forecast-tab]').evaluateAll(nodes=>nodes.map(node=>node.dataset.forecastTab)))===JSON.stringify(['result','evidence','score']));
       for(const view of views){
         await page.locator('[data-forecast-tab="'+view+'"]').click();
@@ -158,19 +156,6 @@ async function run(){
     check('未请求底表资源',!requests.some(value=>value.includes('/forecast_assets/')));
     for(const width of [1366,1920,390]){
       await page.setViewportSize({width,height:1000});
-      const navLayout=await page.evaluate(()=>{
-        const stage=document.querySelector('#moduleNav [aria-current="page"]');
-        const tabs=document.querySelector('#forecastHeaderTools [role=tablist]');
-        const tab=tabs.querySelector('[aria-selected=true]');
-        const primary=stage.getBoundingClientRect(),secondary=tab.getBoundingClientRect();
-        const activeStyle=getComputedStyle(tab),groupStyle=getComputedStyle(tabs);
-        return {primaryHeight:primary.height,secondaryHeight:secondary.height,
-          grouped:parseFloat(groupStyle.borderRadius)>0&&parseFloat(activeStyle.borderRadius)>0,
-          stacked:tabs.getBoundingClientRect().top>=primary.bottom-1,
-          fits:[...tabs.children].every(item=>item.getBoundingClientRect().right<=innerWidth)};
-      });
-      check(width+'px内容标签与阶段导航有层级差异',navLayout.grouped&&navLayout.primaryHeight>navLayout.secondaryHeight&&navLayout.fits);
-      if(width<760)check(width+'px内容标签位于阶段下方且可触控',navLayout.stacked&&navLayout.secondaryHeight>=44);
       check(width+'px标题栏提供三个内容标签并收起重复车型卡', await page.locator('.module-bar [data-forecast-tab]').count()===3 &&
         await page.locator('.forecast-target').isHidden() && await page.locator('.module-bar .forecast-header-menu > summary').isVisible());
       check(width+'px预测导航无返回订单分析入口',await page.locator('.forecast-order-link').count()===0&&await page.getByRole('link',{name:'返回订单分析'}).count()===0);

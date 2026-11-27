@@ -627,19 +627,18 @@ body.forecast-app #forecastHeaderTools > .forecast-target-meta {display:contents
 }
 body.forecast-app #forecastHeaderTools .forecast-target-tabs {
   grid-area:views; display:flex; justify-self:start; align-items:center; gap:2px;
-  box-sizing:border-box; min-width:0; max-width:100%; margin:0; padding:3px;
-  border:1px solid var(--line); background:var(--surface-muted); border-radius:9px;
+  margin:0; padding:3px; border:0; background:var(--surface-muted); border-radius:7px;
 }
 #forecastHeaderTools .forecast-target-tabs button, .forecast-header-menu > summary {
   white-space:nowrap; border:0; border-radius:7px; padding:6px 10px;
   background:transparent; color:var(--muted); font:400 13px/1.4 var(--ui-font); cursor:pointer;
 }
 #forecastHeaderTools .forecast-target-tabs button {
-  min-height:32px; padding:5px 10px; font-size:13px; font-weight:400; border-radius:6px;
+  font-size:12px; font-weight:400; border-radius:5px;
 }
 #forecastHeaderTools .forecast-target-tabs button:hover {color:var(--ink)}
 #forecastHeaderTools .forecast-target-tabs button[aria-selected=true] {
-  background:var(--card); color:var(--ink); font-weight:600; box-shadow:inset 0 0 0 1px var(--line);
+  background:var(--card); color:var(--ink); font-weight:400; box-shadow:inset 0 0 0 1px var(--line);
 }
 #forecastHeaderTools .forecast-target-tabs button:focus-visible {
   outline:2px solid var(--primary); outline-offset:-2px;
@@ -701,15 +700,15 @@ body.forecast-app #forecastHeaderTools .forecast-target-tabs {
   }
 }
 
-/* Stage navigation keeps the primary accent and full-height underline. */
-body.forecast-app .module-bar #moduleNav {
+/* Both sets of top-level controls scroll within the header at narrow widths. */
+body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) {
   display:flex; flex-flow:row nowrap; align-items:center; justify-content:flex-start;
   gap:2px; min-width:0; max-width:100%; height:56px; padding:0; margin:0;
   overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:contain; scrollbar-width:none;
   background:#fff; border:0; border-radius:0;
 }
-body.forecast-app .module-bar #moduleNav::-webkit-scrollbar {display:none}
-body.forecast-app .module-bar #moduleNav button {
+body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs)::-webkit-scrollbar {display:none}
+body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) button {
   display:inline-flex; align-items:center; justify-content:center; gap:7px;
   box-sizing:border-box; flex:0 0 auto; height:56px; min-height:56px; padding:0 16px;
   font-size:14px; font-weight:400; color:var(--muted); white-space:nowrap;
@@ -717,11 +716,11 @@ body.forecast-app .module-bar #moduleNav button {
   background:transparent; box-shadow:none;
   transition:color .16s ease,border-color .16s ease,background-color .16s ease;
 }
-body.forecast-app .module-bar #moduleNav button:not(:disabled):hover,
-body.forecast-app .module-bar #moduleNav button[aria-current="page"] {
+body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) button:not(:disabled):hover,
+body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) button[aria-current="page"] {
   background:var(--primary-soft); color:var(--primary-strong);
 }
-body.forecast-app .module-bar #moduleNav button[aria-current="page"] {
+body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) button[aria-current="page"] {
   font-weight:700; border-bottom-color:var(--primary);
 }
 body.forecast-app #moduleNav .module-icon {opacity:.8}
@@ -733,11 +732,7 @@ body.forecast-app #moduleNav [aria-current="page"] .module-icon {opacity:1}
   body.forecast-app .module-bar:has(.forecast-refresh-status) {
     grid-template-areas:"stage stage" "views views" "tools reset" "time time";
   }
-  body.forecast-app #forecastHeaderTools .forecast-target-tabs {
-    justify-self:stretch; display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
-  }
-  #forecastHeaderTools .forecast-target-tabs button {min-height:44px}
 }
 @media(prefers-reduced-motion:reduce){
-  body.forecast-app .module-bar #moduleNav button {transition:none}
+  body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) button {transition:none}
 }

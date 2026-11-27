@@ -1188,14 +1188,14 @@
     const summary=document.createElement('summary');summary.textContent='评分规则与缺失处理';methodology.append(summary);
     for(const page of pages){
       page.dataset.compactScore='true';
-      for(const table of page.querySelectorAll('.forecast-score-summary-table table')){
+      for(const table of page.querySelectorAll('.forecast-score-detail-table table,.forecast-score-summary-table table')){
         const headings=[...table.querySelectorAll('thead th')].map(th=>th.textContent);
         for(const row of table.querySelectorAll('tbody tr')){
           [...row.cells].forEach((cell,i)=>cell.dataset.label=headings[i]||'');
           if(row.cells.length<5)continue;
-          const cell=row.cells[3];
-          const details=document.createElement('details');details.className='forecast-score-row-details';
-          const summary=document.createElement('summary');summary.textContent='查看得分原因';
+          const cell=table.closest('.forecast-score-detail-table')?row.cells[4]:row.cells[3];
+          const details=document.createElement('details');details.className='forecast-score-row-details';details.open=!!table.closest('.forecast-score-detail-table');
+          const summary=document.createElement('summary');summary.textContent=table.closest('.forecast-score-detail-table')?'评分明细':'查看得分原因';
           summary.setAttribute('aria-label',summary.textContent+'：'+(row.cells[1]?.textContent||''));details.append(summary);
           while(cell.firstChild)details.append(cell.firstChild);cell.append(details);
         }
@@ -1214,36 +1214,19 @@
     compactForecastScorePage(container);
     return container.innerHTML;
   }
-  function renderScoreCandidate({rank,model,status,score,coverage,meta,parts}){
-    const available=parts.filter(item=>item.part).sort((a,b)=>b.contribution-a.contribution);
-    const missing=parts.filter(item=>!item.part).map(item=>esc(item.label));
-    const rows=available.map(({label,part,contribution})=>{
-      const barWidth=Math.min(100,Math.max(0,contribution));
-      return `<tr class="forecast-score-part">
-        <th scope="row">${esc(label)}</th><td class="forecast-candidate-evidence">${esc(part.evidence)}</td>
-        <td class="forecast-candidate-similarity"><span>相似度 </span>${Math.round(part.value*100)}%</td>
-        <td class="forecast-candidate-points"><i aria-hidden="true"><i style="width:${barWidth}%"></i></i><b>${contribution.toFixed(1)}<small> 分</small></b></td>
-      </tr>`;
-    }).join('');
-    const total=Number.isFinite(score)&&score>=0?`${Math.round(score*100)}<small> 分</small>`:'—';
-    return `<details open class="forecast-score-row-details forecast-score-candidate">
-      <summary><span class="forecast-candidate-rank">第 ${rank} 名</span>
-        <span class="forecast-candidate-identity"><strong>${esc(model)}</strong><span>${esc(status)}</span>${meta?`<small>${esc(meta)}</small>`:''}</span>
-        <span class="forecast-candidate-result"><strong class="forecast-candidate-total">${total}</strong><span class="forecast-candidate-coverage">${esc(coverage)}</span></span>
-      </summary><div class="forecast-score-parts">
-      ${rows?`<table class="forecast-candidate-metrics" aria-label="${esc(model)}评分明细"><thead><tr><th scope="col">评分指标</th><th scope="col">实际对比</th><th scope="col">相似度</th><th scope="col">得分贡献</th></tr></thead><tbody>${rows}</tbody></table>`:''}
-      ${missing.length?`<p class="forecast-score-missing"><strong>缺少可比数据</strong> ${missing.join('、')}</p>`:''}</div></details>`;
+  function renderScorePart(label, part, contribution) {
+    if (!part) return `<span class="forecast-score-part unavailable"><b>${esc(label)}</b><small>缺少可比数据</small></span>`;
+    return `<span class="forecast-score-part"><b>${esc(label)}</b><em>相似度 ${Math.round(part.value*100)}% · 贡献 ${contribution.toFixed(1)}分</em><small>${esc(part.evidence)}</small></span>`;
   }
   function lifecycleScoreMarkup({title,referenceScope='',orderLabel='按有效总分降序',description,rules,rows,selected,empty,minimumEvidence=3,weighted=false}){
+    const scoreBar=(score,label)=>`<div class="forecast-score-bar" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(score*100)}"><i style="width:${Math.max(0,Math.min(score,1))*100}%"></i><b>${Math.round(score*100)}分</b></div>`;
     const ruleRows=rules.map(rule=>`<tr><td><b>${esc(rule.label)}</b></td><td>${weighted?Math.round((rule.weight||0)*100)+'%':'等权'}</td><td>${esc(rule.rule)}</td><td>${esc(rule.missing||'任一侧缺失时不参与，并按剩余有效项重新平均')}</td></tr>`).join('');
     const detailRows=rows.map((row,index)=>{const partMap=new Map(row.parts.map(part=>[part.key,part])),effective=row.parts.length,totalWeight=row.parts.reduce((sum,part)=>sum+(weighted?(part.weight||0):1),0),itemKey=row.item.event_id||row.item.model,selectedRole=itemKey===selected[0]?'主参考':itemKey===selected[1]?'辅助参考':'',role=selectedRole?(row.eligible===false?`${selectedRole}·人工`:selectedRole):(row.eligible===false?'证据不足':'候选'),parts=rules.map(rule=>{
       const part=partMap.get(rule.key);
       const contribution=part?part.value*(weighted?part.weight:1)/Math.max(totalWeight,.001)*100:0;
-      return {label:rule.label,part,contribution};
-    });
-      return renderScoreCandidate({rank:index+1,model:row.item.model,status:role,score:row.score,coverage:`有效项 ${effective}/${rules.length}`,meta:row.meta,parts});
-    }).join('');
-    const markup=`<div class="forecast-score-page"><div class="forecast-score-formula"><span>${weighted?'有效相似度 × 对应权重之和':'有效单项相似度之和'}</span><i>÷</i><span>${weighted?'有效权重之和':'有效项数'}</span><strong>= 有效总分</strong></div><p data-score-explanation>${esc(description)} 自动推荐至少需 ${minimumEvidence} 项有效证据，证据不足的车型仍可人工选择。</p><section class="forecast-score-detail"><div class="forecast-score-section-head"><div><h4>${esc(title)}</h4>${referenceScope?`<p class="forecast-score-scope">${esc(referenceScope)}</p>`:''}</div><span>${esc(orderLabel)}</span></div><div class="forecast-score-rule-box"><div class="forecast-score-rule-head"><div><small>评分口径</small><b>为什么这样打分</b></div><span>${rules.length}个候选指标 · 自动推荐至少${minimumEvidence}项</span></div><div class="forecast-score-table forecast-score-rule-table"><table><thead><tr><th>评分指标</th><th>权重</th><th>相似度计算规则</th><th>缺失处理</th></tr></thead><tbody>${ruleRows}</tbody></table></div><p>各项贡献相加即为有效总分。</p></div><div class="forecast-score-detail-table">${detailRows||`<p class="forecast-score-empty">${esc(empty)}</p>`}</div></section></div>`;
+      return renderScorePart(rule.label,part,contribution);
+    }).join('');return `<tr><td>${index+1}</td><td><b>${esc(row.item.model)}</b><em class="forecast-score-status ${role==='候选'?'':'selected'}">${role}</em>${row.meta?`<small>${esc(row.meta)}</small>`:''}</td><td>${scoreBar(row.score,`${row.item.model}有效总分`)}</td><td>${effective}/${rules.length}项</td><td><div class="forecast-score-parts">${parts}</div></td></tr>`}).join('');
+    const markup=`<div class="forecast-score-page"><div class="forecast-score-formula"><span>${weighted?'有效相似度 × 对应权重之和':'有效单项相似度之和'}</span><i>÷</i><span>${weighted?'有效权重之和':'有效项数'}</span><strong>= 有效总分</strong></div><p data-score-explanation>${esc(description)} 自动推荐至少需 ${minimumEvidence} 项有效证据，证据不足的车型仍可人工选择。</p><section class="forecast-score-detail"><div class="forecast-score-section-head"><div><h4>${esc(title)}</h4>${referenceScope?`<p class="forecast-score-scope">${esc(referenceScope)}</p>`:''}</div><span>${esc(orderLabel)}</span></div><div class="forecast-score-rule-box"><div class="forecast-score-rule-head"><div><small>评分口径</small><b>为什么这样打分</b></div><span>${rules.length}个候选指标 · 自动推荐至少${minimumEvidence}项</span></div><div class="forecast-score-table forecast-score-rule-table"><table><thead><tr><th>评分指标</th><th>权重</th><th>相似度计算规则</th><th>缺失处理</th></tr></thead><tbody>${ruleRows}</tbody></table></div><p>各项贡献相加即为有效总分。</p></div><div class="forecast-score-table forecast-score-detail-table"><table><thead><tr><th>排名</th><th>候选车型</th><th>有效总分</th><th>有效项</th><th>实际对比与得分贡献</th></tr></thead><tbody>${detailRows||`<tr><td colspan="5">${esc(empty)}</td></tr>`}</tbody></table></div></section></div>`;
     return markup;
   }
   const observedDailyPrefix=values=>{const gap=values.findIndex(value=>value===null||value===undefined||value===''||!Number.isFinite(Number(value))||Number(value)<0);return gap<0?values:values.slice(0,gap)};

@@ -16,19 +16,9 @@ def fixture():
         'launch_date': '2026-11-13', 'end_date': '2026-11-15', 'days': 3,
         'launch_days': 3, 'small': 100, 'total_small': 100, 'stage': 'active',
         'small_start_date': '2026-11-10', 'small_end_date': '2026-11-12',
-        'steady_start_date': '2026-11-16', 'small_period': '晚上', 'launch_period': '晚上',
+        'steady_start_date': '2026-11-16',
     }
-    candidates = [{'model': label, 'tier': 'SUV', 'energy': energy, 'node': '新车', 'days': 3}
-                  for label, energy in [('参考车型乙', '纯电'), ('参考车型丙', '增程')]]
-    hourly = [None] * 20 + [.3, .6, .8, 1]
-    launch_history = [dict(car, launch_date='2026-10-25', end_date='2026-10-27',
-                           hourly_curve=hourly, daily_direct=[10, 6, 4]) for car in candidates]
-    small_history = [dict(car, small_start_date='2026-10-22', total=100, daily_orders=[50, 30, 20],
-                          small_progress=[.5, .8, 1], small_hourly_curve=hourly) for car in candidates]
-    steady_history = [dict(car, daily=[{'date': f'2026-11-{day:02d}', 'lock': 10}
-                                      for day in range(1, 8)]) for car in candidates]
-    data = {'target': target, 'targets': [target], 'history': launch_history, 'actuals': [],
-            'small_order_history': small_history, 'steady_history': steady_history,
+    data = {'target': target, 'targets': [target], 'history': [], 'actuals': [],
             'tasks': [{'key': k, 'label': label, 'purpose': purpose} for k, label, purpose in TASKS],
             'tiers': ['SUV'], 'energies': ['纯电'], 'nodes': ['新车']}
     page = {'layout': 'workspace', 'workspace': {'kind': 'forecast_workspace', 'data': data},

@@ -25,85 +25,6 @@ async function openPortal(browser, origin, errors) {
   return {context, page, frame};
 }
 
-async function checkCandidateLayout(page, groups, {stage, singleCampaign}) {
-  for (const group of await groups.all()) {
-    const list = group.locator('.forecast-score-detail-table');
-    assert.equal(await list.locator(':scope > table').count(), 0);
-    const candidates = list.locator('details.forecast-score-row-details');
-    const count = await candidates.count();
-    if (singleCampaign) assert.equal(count, 2, stage+' fixture candidates');
-    if (!count) continue;
-    assert(await candidates.evaluateAll(rows => rows.every(row => row.open)), stage+' default expansion');
-    const first = candidates.first(), parts = first.locator(':scope > .forecast-score-parts');
-    const toggle = first.locator(':scope > summary');
-    assert.deepEqual(await parts.locator('thead th').allTextContents(), ['评分指标','实际对比','相似度','得分贡献']);
-    const contributions = await parts.locator('tr.forecast-score-part').evaluateAll(rows =>
-      rows.map(row => Number(row.cells[3].textContent.match(/[\d.]+/)?.[0] ?? NaN)));
-    assert(contributions.every((value, i) => Number.isFinite(value) && (!i || value <= contributions[i-1])),
-      stage+' contributions in descending order: '+contributions);
-    if (singleCampaign) {
-      const summaries = candidates.locator(':scope > summary');
-      assert.deepEqual(await summaries.locator('.forecast-candidate-rank').allTextContents(), ['第 1 名','第 2 名']);
-      const names = await summaries.locator('.forecast-candidate-identity strong').allTextContents();
-      assert.deepEqual(names.sort(), ['参考车型丙','参考车型乙']);
-      for (const role of await summaries.locator('.forecast-candidate-identity > span').allTextContents()) {
-        assert.match(role, /主参考|辅助参考|候选|证据不足/);
-      }
-      const totalText = await toggle.locator('.forecast-candidate-total').innerText();
-      assert.match(totalText, /\d+\s*分/);
-      const total = Number(totalText.match(/\d+/)[0]);
-      const sum = contributions.reduce((sum, contribution) => sum + contribution, 0);
-      assert(Math.abs(total - sum) <= .5 + contributions.length * .05, stage+' total '+total+' vs '+sum);
-      const coverage = await toggle.locator('.forecast-candidate-coverage').innerText();
-      assert.match(coverage, stage === 'launch' ? /有效\/配置权重\s+\d+%\s*\/\s*\d+%/ : /有效项\s+\d+\s*\/\s*\d+/);
-      assert(await first.locator('.forecast-score-missing').isVisible(), stage+' missing indicators');
-    }
-    for (const width of [1440, 390]) {
-      await page.setViewportSize({width, height: 900});
-      const layout = await parts.evaluate(grid => {
-        const candidate = grid.parentElement;
-        const bounds = grid.getBoundingClientRect();
-        const summary = candidate.querySelector(':scope > summary');
-        const heading = summary.getBoundingClientRect();
-        const summaryFields = Array.from(summary.children, el => el.getBoundingClientRect());
-        const table = grid.querySelector('table');
-        const headers = [...table.tHead.rows[0].cells].map(cell => cell.getBoundingClientRect());
-        const rows = [...table.querySelectorAll('tr.forecast-score-part')].map(row =>
-          [...row.cells].map(cell => cell.getBoundingClientRect()));
-        return {
-          candidateWidth: candidate.getBoundingClientRect().width, gridWidth: bounds.width,
-          left: bounds.left, right: bounds.right, viewport: innerWidth,
-          detailTop: bounds.top, summaryBottom: heading.bottom, summaryWidth: heading.width,
-          summaryHeight: heading.height,
-          fieldsAlign: Math.max(...summaryFields.map(r => r.top)) < Math.min(...summaryFields.map(r => r.bottom)),
-          headerCount: headers.length, rowCount: rows.length,
-          fourCells: rows.every(cells => cells.length === 4),
-          aligned: rows.every(cells => cells.every((cell, i) => Math.abs(cell.left - headers[i].left) <= 1)),
-          twoLines: rows.every(([name, comparison, similarity, contribution]) =>
-            name.top < contribution.bottom && contribution.top < name.bottom &&
-            comparison.top < similarity.bottom && similarity.top < comparison.bottom &&
-            comparison.top >= name.bottom - 1 && similarity.top >= contribution.bottom - 1),
-          overflow: Math.max(grid.scrollWidth - grid.clientWidth, table.getBoundingClientRect().right - bounds.right),
-        };
-      });
-      const evidence = stage+' at '+width+'px '+JSON.stringify(layout);
-      assert(layout.headerCount === 4 && layout.fourCells && (!singleCampaign || layout.rowCount > 0), evidence);
-      assert(layout.gridWidth >= layout.candidateWidth * .9, evidence);
-      assert(layout.detailTop >= layout.summaryBottom - 1 && layout.summaryWidth >= layout.candidateWidth * .9, evidence);
-      if (width === 1440) assert(layout.fieldsAlign && layout.summaryHeight < 80, evidence);
-      assert(layout.left >= -1 && layout.right <= layout.viewport + 1 && layout.overflow <= 1, evidence);
-      assert(width === 1440 ? layout.aligned : layout.twoLines, evidence);
-      await toggle.click();
-      assert(!(await first.evaluate(el => el.open)) && !(await parts.isVisible()), stage+' collapse');
-      if (count > 1) assert(await candidates.nth(1).evaluate(el => el.open), stage+' independent expansion');
-      await toggle.focus();
-      await page.keyboard.press('Enter');
-      assert(await first.evaluate(el => el.open) && await parts.isVisible(), stage+' keyboard expansion');
-    }
-  }
-  await page.setViewportSize({width: 1440, height: 900});
-}
-
 async function checkLayout(page, frame, {singleCampaign}) {
   const model = frame.getByRole('combobox', {name: '预测车型', exact: true});
   const parameterMenu = frame.locator('#forecastNavParameters');
@@ -202,10 +123,9 @@ async function checkLayout(page, frame, {singleCampaign}) {
         const formulas = methodology.locator('.forecast-score-formula');
         assert.equal(await formulas.count(), stage === 'small' ? 2 : 1);
         for (const formula of await formulas.all()) assert(await formula.isVisible());
-        const groups = scores.locator('.forecast-score-detail');
-        assert.equal(await groups.count(), stage === 'small' ? 2 : 1);
-        await checkCandidateLayout(page, groups, {stage, singleCampaign});
-        assert.equal(await groups.locator('.forecast-score-part-rule').count(), 0);
+        const candidateDetails = scores.locator('.forecast-score-detail-table .forecast-score-row-details');
+        assert.equal(await candidateDetails.locator('xpath=self::*[not(@open)]').count(), 0);
+        assert.equal(await scores.locator('.forecast-score-detail-table .forecast-score-part-rule').count(), 0);
         if (stage === 'small') {
           const scopes = await scores.locator('.forecast-score-scope').allTextContents();
           assert.equal(scopes.length, 2);

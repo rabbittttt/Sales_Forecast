@@ -70,8 +70,8 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||path.join(project,'.test
       assert(await reasons.evaluateAll(nodes=>nodes.every(node=>!node.open)),`${stage}/${width}: summary reasons stay collapsed`);
       await details.first().locator('summary').click();assert.equal(await details.first().getAttribute('open'),null);
       assert(await page.locator('.forecast-score-methodology:visible').count()>0);
-      const summaryHeight=await details.first().evaluate(card=>card.getBoundingClientRect().height);
-      assert(summaryHeight<(width<700?160:80),`compact ${stage} candidate summary ${summaryHeight}px`);
+      const rowHeight=await page.locator('.forecast-score-detail-table:visible tbody tr').first().evaluate(n=>n.getBoundingClientRect().height);
+      assert(rowHeight<(width<700?300:150),`compact ${stage} score row ${rowHeight}px`);
       await details.first().locator('summary').click();assert.notEqual(await details.first().getAttribute('open'),null);
      }
      if(view==='evidence'){
