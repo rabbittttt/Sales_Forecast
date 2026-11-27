@@ -149,10 +149,10 @@ const screenshot = (page, name) => page.screenshot({path: path.join(output, name
     report.checks.push('both launch method charts and value tables use existing daily quantities without changing predictions');
 
     // Exercise missing values and true zero directly through the production adapters.
-    const adapters = await page.evaluate(({quantity, decision, score}) => {
+    const adapters = await page.evaluate(({quantity, decision}) => {
       const fmt = value => typeof value === 'number' && Number.isFinite(value) ? new Intl.NumberFormat('zh-CN').format(value) : '—';
       const esc = value => String(value ?? '').replace(/[&<>\"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[char]));
-      const api = new Function('fmt', 'esc', `'use strict';\n${quantity}\n${decision}\n${score}\nreturn {renderForecastDecisionChartV2,compactForecastScorePage};`)(fmt, esc);
+      const api = new Function('fmt', 'esc', `'use strict';\n${quantity}\n${decision}\nreturn {renderForecastDecisionChartV2};`)(fmt, esc);
       const rows = Object.freeze([
         Object.freeze({day: 'D1', date: '2026-11-01', actual: true, daily_gross: 0, cumulative_gross: 100}),
         Object.freeze({day: 'D2', date: '2026-11-02', missing: true, daily_gross: null, cumulative_gross: null}),
@@ -163,19 +163,12 @@ const screenshot = (page, name) => page.screenshot({path: path.join(output, name
       api.renderForecastDecisionChartV2(container, rows, 'progress');
       const values = [...container.querySelectorAll('tbody tr')].map(row => row.cells[2].textContent);
       const labels = [...container.querySelectorAll('[data-forecast-quantity-label]')].map(label => label.textContent);
-      const scores = document.createElement('div');
-      scores.innerHTML = '<div class="forecast-score-page"><div class="forecast-score-detail-table"><table><thead><tr><th>排名</th><th>车型</th><th>总分</th><th>有效项</th><th>明细</th></tr></thead><tbody><tr><td>1</td><td>测试车型</td><td>80</td><td>3</td><td>真实明细</td></tr></tbody></table></div></div>';
-      api.compactForecastScorePage(scores);
-      const detail = scores.querySelector('.forecast-score-row-details'), initialOpen = detail.open;
-      detail.open = false;
-      api.compactForecastScorePage(scores);
-      return {values, labels, unchanged: JSON.stringify(rows) === before, initialOpen, stillCollapsed: !detail.open, detailCount: scores.querySelectorAll('.forecast-score-row-details').length};
-    }, {quantity: productionFunction('renderForecastQuantityChart'), decision: productionFunction('renderForecastDecisionChartV2'), score: productionFunction('compactForecastScorePage')});
+      return {values, labels, unchanged: JSON.stringify(rows) === before};
+    }, {quantity: productionFunction('renderForecastQuantityChart'), decision: productionFunction('renderForecastDecisionChartV2')});
     assert.deepEqual(adapters.values, ['0', '—', '37']);
     assert.deepEqual(adapters.labels, ['0', '37']);
-    assert(adapters.unchanged && adapters.initialOpen && adapters.stillCollapsed);
-    assert.equal(adapters.detailCount, 1);
-    report.checks.push('true zero and missing daily data remain distinct; source rows are immutable; score compaction preserves a manual collapse');
+    assert(adapters.unchanged);
+    report.checks.push('true zero and missing daily data remain distinct; source rows are immutable');
 
     // All stage score detail rows are initially expanded, and remain normal disclosures.
     for (const stage of ['small', 'launch', 'steady']) {
@@ -193,6 +186,12 @@ const screenshot = (page, name) => page.screenshot({path: path.join(output, name
         if (!counts.total) continue; // A task with no eligible evidence correctly has no detail rows.
         await details.first().locator('summary').click();
         assert.equal(await details.first().evaluate(node => node.open), false, 'Manual collapse must still work');
+        await scope.evaluate((scope, source) => {
+          const compact = new Function(source+'\nreturn compactForecastScorePage;')();
+          compact(scope);
+        }, productionFunction('compactForecastScorePage'));
+        assert.equal(await details.count(), counts.total, 'Compaction must preserve the existing candidates');
+        assert.equal(await details.first().evaluate(node => node.open), false, 'Compaction must preserve the manual collapse');
         await details.first().locator('summary').click();
         assert.equal(await details.first().evaluate(node => node.open), true);
         checked += counts.total;
