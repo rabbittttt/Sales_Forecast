@@ -4,17 +4,22 @@ import argparse
 import hashlib
 import json
 from copy import copy
+from contextlib import ExitStack
 import logging
 import os
 import re
+import shutil
+import sqlite3
 import sys
 import unicodedata
 import math
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from tempfile import gettempdir
 from time import perf_counter
 from typing import Any, Iterable
+from uuid import uuid4
 from zipfile import BadZipFile
 from zlib import error as ZlibError
 
@@ -39,8 +44,11 @@ from core.forecast_summary import SUMMARY_NAME, INDEX_SHEET, GUIDE_SHEET, DAILY_
 from core.forecast_summary import GROSS_DAILY_SHEET, GROSS_PROGRESS_SHEET, LAUNCH_CANCEL_SHEET, LAUNCH_CANCEL_DAILY_SHEET, SMALL_CANCEL_SHEET, SMALL_CANCEL_DAILY_SHEET
 from core.excel import WorkbookItem, _source_date_range, grain_from_sheet, load_data_workbook, compact_diagnostic_ranges, reset_conflict_diagnostics
 from core.campaign_source import campaign_batch, edition_signature, is_edition, open_source, published_path
+from core.build_lock import file_lock
+from core.discovery import subjects_from_sources
+from core.forecast_summary import visible_target_names
 from core.data_paths import (orders_input_directory, model_information_directory,
-                             forecast_summary_path, excel_cache_directory, assert_output_is_private,
+                             forecast_summary_path, forecast_database_path, excel_cache_directory, assert_output_is_private,
                              assert_summary_output)
 
 CODE_ROOT = GENERATE_HTML_ROOT.parent
@@ -581,14 +589,34 @@ def mapping_record_for(
 
 
 def build_secondary(source: Path, output: Path, mapping_path: Path, orders_dir: Path | None = None, as_of_date: str = "") -> None:
-    with campaign_batch(source):
-        _build_secondary(source, output, mapping_path, orders_dir, as_of_date)
-
-
-def _build_secondary(source, output, mapping_path, orders_dir, as_of_date):
     output = assert_summary_output(output)
     if output in {source.resolve(), mapping_path.resolve()}:
         raise ValueError(f"汇总输出不能覆盖来源文件：{output}")
+    database = paired_database(source, output, mapping_path)
+    with campaign_batch(source), ExitStack() as resources:
+        _build_secondary(source, output, mapping_path, orders_dir, as_of_date, database, resources)
+
+
+def paired_database(source, output, mapping):
+    shared = output.resolve() == forecast_summary_path(PROJECT_ROOT)
+    if not shared and output.resolve().suffix.lower() != ".sqlite3":
+        return None
+    database = forecast_database_path(PROJECT_ROOT)
+    if output.resolve() == database:
+        raise ValueError(f"Excel 汇总输出不能覆盖销量数据库：{database}")
+    if not shared:
+        return None
+    if database in {source.resolve(), mapping.resolve()}:
+        raise ValueError(f"销量数据库不能覆盖来源文件：{database}")
+    return database
+
+
+def _build_secondary(source, output, mapping_path, orders_dir, as_of_date, database, resources):
+    if database is not None and orders_dir is None:
+        orders_dir = orders_input_directory(PROJECT_ROOT)
+    inventory = {} if database is not None else None
+    if database is not None:
+        signature = forecast_database_signature(source, mapping_path, orders_dir, as_of_date)
     started = perf_counter()
     timings = {}
     mapping, aliases = load_mapping(mapping_path)
@@ -906,15 +934,15 @@ def _build_secondary(source, output, mapping_path, orders_dir, as_of_date):
     write_rows(workbook, "每日直接大定占比", ["传播名", *day_headers], daily_direct_share_rows, "DailyDirectShare", set(day_headers))
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_name(f".{output.stem}.refreshing{output.suffix}")
-    if temporary.exists():
-        temporary.unlink()
+    temporary = output.with_name(f".{output.stem}.{uuid4().hex}.refreshing{output.suffix}")
+    resources.callback(temporary.unlink, missing_ok=True)
+    resources.callback(workbook.close)
     workbook.save(temporary)
     timings['历史基准与中间文件'] = perf_counter() - started
     if orders_dir is not None:
         stage_started = perf_counter()
         append_forecast_inputs(workbook, source, mapping_path, orders_dir, as_of_date,
-                               preserve_layout=False, cache_dir=excel_cache_directory())
+                               preserve_layout=False, cache_dir=excel_cache_directory(), inventory=inventory)
         # These source copies feed both the roster and raw small-order history.
         # Do not let an invalid copied value bypass the normalized baseline.
         copied_summaries = [r.get("汇总Sheet") for r in table_records(workbook, INDEX_SHEET)
@@ -930,11 +958,18 @@ def _build_secondary(source, output, mapping_path, orders_dir, as_of_date):
     reorder_summary_sheets(workbook)
     sheet_count = len(workbook.sheetnames)
     workbook.save(temporary)
-    workbook.close()
-    try:
-        os.replace(temporary, output)
-    except PermissionError as exc:
-        raise PermissionError(f"无法覆盖 {output}，请确认 Excel 中没有打开该文件") from exc
+    if database is not None:
+        from core.summary_sqlite import publish_workbook
+        staged_db = database.with_name(f".{database.stem}.{uuid4().hex}.sqlite3")
+        resources.callback(staged_db.unlink, missing_ok=True)
+        metadata = forecast_page_metadata(workbook, orders_dir, inventory)
+        publish_workbook(staged_db, workbook, source_path=temporary, signature=signature, metadata=metadata)
+        with publication_lock(output):
+            if signature != forecast_database_signature(source, mapping_path, orders_dir, as_of_date):
+                raise ValueError("生成期间订单输入已变化，请重新刷新")
+            publish_summary_pair(temporary, output, staged_db, database, resources)
+    else:
+        replace_summary(temporary, output)
     timings['最终保存'] = perf_counter() - stage_started
     LOGGER.info('[销量汇总耗时] %s | 总计 %.2fs',
                 ' | '.join(f'{name} {seconds:.2f}s' for name, seconds in timings.items()),
@@ -942,11 +977,95 @@ def _build_secondary(source, output, mapping_path, orders_dir, as_of_date):
     LOGGER.info("刷新完成：%s（%d个传播名、%d天、%d个Sheet）", output, len(models), day_count, sheet_count)
 
 
+def replace_summary(temporary, output):
+    try:
+        os.replace(temporary, output)
+    except PermissionError as exc:
+        raise PermissionError(f"无法覆盖 {output}，请确认 Excel 中没有打开该文件") from exc
+
+
+def publication_lock(output):
+    # Independent local launches can select different private DB directories
+    # while sharing one XLSX. Key their OS lock to that common destination.
+    identity = os.path.normcase(str(output.resolve())).encode()
+    return file_lock(Path(gettempdir()) / "sales-forecast-locks" / hashlib.sha256(identity).hexdigest())
+
+
+def publish_summary_pair(temporary, output, staged_db, database, resources):
+    """Both editions are fully built before either published file changes."""
+    previous = None
+    if output.exists():
+        previous = output.with_name(f".{output.stem}.{uuid4().hex}.bak")
+        resources.callback(previous.unlink, missing_ok=True)
+        try:
+            os.link(output, previous)
+        except OSError:
+            shutil.copy2(output, previous)
+    replace_summary(temporary, output)
+    try:
+        os.replace(staged_db, database)
+    except OSError:
+        if previous is None:
+            output.unlink()
+        else:
+            os.replace(previous, output)
+        raise
+
+
 ORDER_FILE_KEYWORDS = ("首销期订单节奏", "小订退订分析", "小订选配比例", "锁单选配比例", "大定选配比例")
 
 
 def forecast_order_files(directory: Path) -> list[Path]:
     return sorted(path for path in directory.glob("*.xlsx") if not path.name.startswith("~$") and any(key in path.name for key in ORDER_FILE_KEYWORDS))
+
+
+def subject_files(directory):
+    return sorted(path for path in directory.glob("*.xlsx")
+                  if path.name not in {SUMMARY_NAME, FORECAST_SOURCE_PATH.name}
+                  and not path.name.startswith("~$") and not path.name.endswith(".refreshing.xlsx"))
+
+
+def subject_evidence(book):
+    """Retain only the inputs that subject discovery reads from this workbook."""
+    chart_names = [row[0] for sheet in book.worksheets if "图表" in sheet.title
+                   for row in sheet.iter_rows(max_col=1, values_only=True) if row[0] is not None]
+    return book.sheetnames, chart_names
+
+
+def forecast_page_metadata(workbook, directory, inventory):
+    sheet_names, chart_names, errors = [], [], []
+    paths = subject_files(directory)
+    for path in paths:
+        if path in inventory:
+            names, values = inventory[path]
+        else:
+            try:
+                with path.open("rb") as stream:
+                    book = load_workbook(stream, read_only=True, data_only=True, keep_links=False)
+                    try:
+                        names, values = subject_evidence(book)
+                    finally:
+                        book.close()
+            except Exception as exc:
+                message = f"Excel读取失败: {path.name}: {exc}"
+                LOGGER.error("%s", message)
+                errors.append(message)
+                continue
+        sheet_names.extend(names)
+        chart_names.extend(values)
+    subjects = subjects_from_sources(sheet_names, chart_names, visible_target_names(workbook))
+    return {"subjects": [subject.to_dict() for subject in subjects], "load_errors": errors,
+            "source_count": len(paths) - len(errors)}
+
+
+def forecast_database_signature(source, mapping, directory, as_of_date):
+    facts = [forecast_signature(source, mapping, directory, as_of_date), str(directory.resolve())]
+    for path in subject_files(directory):
+        stat = path.stat()
+        facts.append((path.name, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+    for module in ("discovery.py", "summary_sqlite.py", "models.py"):
+        facts.append(hashlib.sha256((GENERATE_HTML_ROOT / "core" / module).read_bytes()).hexdigest())
+    return hashlib.sha256(json.dumps(facts, ensure_ascii=False).encode()).hexdigest()
 
 
 def fit_summary_columns(sheet):
@@ -979,7 +1098,7 @@ def forecast_signature(source, mapping, directory, as_of_date, *, legacy=False):
     return digest if legacy else "v2:" + digest
 
 
-def append_forecast_inputs(workbook, source, mapping_path, orders_dir, as_of_date, preserve_layout=True, *, cache_dir=None):
+def append_forecast_inputs(workbook, source, mapping_path, orders_dir, as_of_date, preserve_layout=True, *, cache_dir=None, inventory=None):
     """Consolidate values and formats, never fill blanks or add duplicate orders."""
     directory = []
     source_ranges = {}
@@ -1065,6 +1184,8 @@ def append_forecast_inputs(workbook, source, mapping_path, orders_dir, as_of_dat
         loaded = perf_counter()
         try:
             if kind == "订单":
+                if inventory is not None:
+                    inventory[path] = subject_evidence(book)
                 source_ranges[path.name] = _source_date_range(WorkbookItem(path, book))
             for sheet in book.worksheets:
                 if kind == "历史" and sheet.title not in {"车型汇总", "小订by天"} and not (sheet is book.worksheets[0] and sheet.title != "小订进度" and stage_records(path)):
@@ -1788,25 +1909,49 @@ def main() -> int:
 
 def refresh_selected(args):
     ensure_mapping(args.mapping, args.source)
-    if not args.force and summary_is_current(args.source, args.output, args.mapping, args.orders, args.as_of_date):
+    if not args.force and reuse_summary(args):
+        LOGGER.info("销量数据汇总已是最新，跳过刷新：%s", args.output)
+        return 0
+    build_secondary(args.source, args.output, args.mapping, args.orders, args.as_of_date)
+    return 0
+
+
+def reuse_summary(args):
+    with ExitStack() as resources:
+        database = paired_database(args.source, args.output, args.mapping)
+        audit_day = date.fromisoformat(args.as_of_date) if args.as_of_date else date.today()
+        if database is not None:
+            from core.summary_sqlite import open_workbook, publish_workbook
+            resources.enter_context(publication_lock(args.output))
+            signature = forecast_database_signature(args.source, args.mapping, args.orders, args.as_of_date)
+            try:
+                with open_workbook(database, source_path=args.output, signature=signature) as book:
+                    audit_final_forecast(book, audit_day)
+                    return True
+            except FileNotFoundError:
+                pass
+            except (*SUMMARY_FORMAT_ERRORS, sqlite3.DatabaseError) as exc:
+                LOGGER.info("销量数据库需更新：%s", exc)
+        if not summary_is_current(args.source, args.output, args.mapping, args.orders, args.as_of_date):
+            return False
         # read_only defers cell parsing. A readable workbook header does not
         # guarantee its cached daily tables can actually be consumed.
-        audit_day = date.fromisoformat(args.as_of_date) if args.as_of_date else date.today()
+        handle = resources.enter_context(args.output.open("rb"))
         try:
-            with args.output.open("rb") as handle:
-                book = load_workbook(handle, read_only=True, data_only=True)
-                try:
-                    audit_final_forecast(book, audit_day)
-                finally:
-                    book.close()
+            book = load_workbook(handle, read_only=True, data_only=True)
+            resources.callback(book.close)
+            audit_final_forecast(book, audit_day)
         except SUMMARY_FORMAT_ERRORS as exc:
             LOGGER.warning("[销量汇总损坏] 文件=%s | %s: %s | 处理=从原始来源重新生成",
                            args.output, type(exc).__name__, exc)
-        else:
-            LOGGER.info("销量数据汇总已是最新，跳过刷新：%s", args.output)
-            return 0
-    build_secondary(args.source, args.output, args.mapping, args.orders, args.as_of_date)
-    return 0
+            return False
+        if database is not None:
+            metadata = forecast_page_metadata(book, args.orders, {})
+            if forecast_database_signature(args.source, args.mapping, args.orders, args.as_of_date) != signature:
+                raise ValueError("建立数据库期间订单输入已变化，请重新刷新")
+            publish_workbook(database, book, source_path=args.output, signature=signature, metadata=metadata)
+            LOGGER.info("已根据当前销量汇总更新数据库：%s", database)
+        return True
 
 
 if __name__ == "__main__":

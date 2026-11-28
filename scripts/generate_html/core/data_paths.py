@@ -80,6 +80,15 @@ def dynamic_output_directory(project_root: Path = PROJECT_ROOT) -> Path:
     return project_output_directory(project_root) / "dynamic"
 
 
+def forecast_database_path(project_root: Path = PROJECT_ROOT) -> Path:
+    """Private, queryable edition of the shared sales summary."""
+    path = project_output_directory(project_root) / "sales-summary.sqlite3"
+    resolved = assert_output_is_private(path, project_root)
+    if resolved != path:
+        raise ValueError(f"销量汇总数据库文件不能指向其他文件：{path}")
+    return resolved
+
+
 def dynamic_log_directory(project_root: Path = PROJECT_ROOT) -> Path:
     root = Path(project_root).resolve()
     configured = os.environ.get("PLANHUB_APP_LOG_DIR")

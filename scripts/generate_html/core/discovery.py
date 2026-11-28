@@ -65,25 +65,28 @@ def is_valid_subject_name(name: str) -> bool:
 
 
 def discover_subjects(store: WorkbookStore, forecast_targets: Iterable[str] = ()) -> list[Subject]:
+    sheet_names = (name for _, name in store.all_sheet_names())
+    chart_values = (row[0] for item in store.items for sheet in item.workbook.worksheets
+                    if "图表" in sheet.title for row in sheet.iter_rows(max_col=1, values_only=True))
+    return subjects_from_sources(sheet_names, chart_values, forecast_targets)
+
+
+def subjects_from_sources(sheet_names, chart_values, forecast_targets):
     names: dict[str, str] = {"鸿蒙智行": "鸿蒙智行"}
     records = generation_records()
-    for _, sheet_name in store.all_sheet_names():
+    for sheet_name in sheet_names:
         subject = parent_generation(sheet_subject(sheet_name), records)
         if subject and "图表" not in subject and subject not in {"Sheet1", "汇总"} and is_valid_subject_name(subject):
             clean = clean_text(subject)
             key = _subject_key(clean)
             if _prefer_subject_label(names.get(key), clean):
                 names[key] = clean
-    for item in store.items:
-        for sheet in item.workbook.worksheets:
-            if "图表" not in sheet.title:
-                continue
-            for row in range(1, sheet.max_row + 1):
-                value = clean_text(parent_generation(sheet.cell(row, 1).value, records))
-                if value and is_valid_subject_name(value):
-                    key = _subject_key(value)
-                    if _prefer_subject_label(names.get(key), value):
-                        names[key] = value
+    for raw_value in chart_values:
+        value = clean_text(parent_generation(raw_value, records))
+        if value and is_valid_subject_name(value):
+            key = _subject_key(value)
+            if _prefer_subject_label(names.get(key), value):
+                names[key] = value
 
     # Forecast targets can exist before a raw by-day Sheet is available.
     target_keys = set()

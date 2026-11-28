@@ -6,10 +6,12 @@ import logging
 import re
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import webbrowser
 from collections import defaultdict
+from contextlib import ExitStack, contextmanager
 from datetime import date, datetime
 from pathlib import Path
 from time import perf_counter
@@ -20,13 +22,15 @@ from core.build_lock import build_lock
 from core.components import add_kpi_comparisons
 from core.china_calendar import PUBLISHED_YEARS
 from core.config import load_config, SUMMARY_REUSE_UNAVAILABLE
-from core.data_paths import orders_input_directory, assert_output_is_private, forecast_summary_path, assert_summary_output, project_output_directory, static_output_directory
+from core.data_paths import orders_input_directory, assert_output_is_private, forecast_database_path, forecast_summary_path, assert_summary_output, project_output_directory, static_output_directory
 from core.discovery import discover_subjects, set_capabilities
 from core.excel import WorkbookStore, reset_conflict_diagnostics
-from core.forecast_summary import SUMMARY_NAME, visible_target_names
+from core.forecast_summary import SUMMARY_NAME, summary_scope, visible_target_names
+from core.models import Subject
 from core.campaign_source import campaign_batch, preferred_source, published_path
 from core.model_identity import FORECAST_SOURCE_PATH
 from core.renderer import render_dashboard, forecast_manifest
+from core.summary_sqlite import SummaryDatabaseError, open_workbook
 from core.validation import validate_manifest
 from modules.registry import MODULES
 
@@ -157,27 +161,33 @@ def refresh_sales_forecast_data(config: dict[str, Any], input_dir: Path | None =
     LOGGER.info("销量预测二次处理刷新：完成")
 
 
-def require_current_forecast_summary(input_dir: Path, summary_path: Path, as_of_date: str) -> None:
-    """Apply the existing refresh checks without writing the shared workbook."""
+@contextmanager
+def current_forecast_snapshot(input_dir, summary_path, as_of_date, *, reuse_only):
+    """Pin the published database, its Excel export and this run's inputs to one batch."""
     from tools.refresh_sales_forecast_data import (
         DEFAULT_SOURCE, SUMMARY_FORMAT_ERRORS, audit_final_forecast,
-        resolve_source_path, summary_is_current,
+        forecast_database_signature, publication_lock, resolve_source_path,
     )
 
-    try:
-        source = resolve_source_path(preferred_source(DEFAULT_SOURCE))
-        if not summary_is_current(source, summary_path, source, input_dir, as_of_date):
-            raise ForecastSummaryNotCurrent
-        audit_day = date.fromisoformat(as_of_date) if as_of_date else date.today()
-        with summary_path.open("rb") as handle:
-            workbook = load_workbook(handle, read_only=True, data_only=True)
-            try:
+    database = forecast_database_path(PROJECT_ROOT)
+    with ExitStack() as resources:
+        try:
+            with publication_lock(summary_path):
+                source = resolve_source_path(preferred_source(DEFAULT_SOURCE))
+                signature = forecast_database_signature(source, source, input_dir, as_of_date)
+                workbook = resources.enter_context(open_workbook(database, source_path=summary_path, signature=signature))
+            active = resources.enter_context(summary_scope(summary_path, workbook))
+            if not active.get("visible"):
+                raise SummaryDatabaseError("销量汇总数据库缺少当前预测表")
+            if reuse_only:
+                audit_day = date.fromisoformat(as_of_date) if as_of_date else date.today()
                 audit_final_forecast(workbook, audit_day)
-            finally:
-                workbook.close()
-    except (FileNotFoundError, *SUMMARY_FORMAT_ERRORS) as exc:
-        raise ForecastSummaryNotCurrent from exc
-    LOGGER.info("销量数据汇总已是最新，直接生成当前版本页面")
+        except (FileNotFoundError, sqlite3.DatabaseError, *SUMMARY_FORMAT_ERRORS) as exc:
+            if reuse_only:
+                raise ForecastSummaryNotCurrent from exc
+            raise
+        LOGGER.info("页面读取同批销量数据库：%s", database)
+        yield workbook.metadata
 
 
 def forecast_target_names(summary_path: Path) -> list[str]:
@@ -258,7 +268,8 @@ def build(
 def _build(input_dir, output_file, *, disable_sales_forecast=False, campaign_revision=None,
            force_refresh=False, reuse_summary_only=False):
     build_started = perf_counter()
-    assert_output_is_private(output_file)
+    if assert_output_is_private(output_file) == forecast_database_path(PROJECT_ROOT):
+        raise ValueError("HTML 输出不能覆盖销量汇总数据库")
     LOGGER.info("开始生成独立销量预测看板")
     LOGGER.info("输入目录: %s", input_dir)
     LOGGER.info("输出文件: %s", output_file)
@@ -283,23 +294,34 @@ def _build(input_dir, output_file, *, disable_sales_forecast=False, campaign_rev
         raise ValueError("config.json 的 build_manifest_mode 必须是 compact、full 或 off")
     stage_started = perf_counter()
     summary_path = forecast_summary_path(PROJECT_ROOT)
-    if reuse_summary_only:
-        require_current_forecast_summary(input_dir, summary_path, config.get("forecast_as_of_date") or "")
-    else:
+    if not reuse_summary_only:
         refresh_sales_forecast_data(config, input_dir)
     refresh_seconds = perf_counter() - stage_started
     cache_dir = output_file.parent / ".cache" / "excel"
     store = WorkbookStore(input_dir, cache_dir=cache_dir)
-    stage_started = perf_counter()
-    auxiliary_names = (SUMMARY_NAME, FORECAST_SOURCE_PATH.name)
-    store.load(exclude_names=set(auxiliary_names), data_only_view=config.get("chart_render_mode") == "generated")
-    load_seconds = perf_counter() - stage_started
-    if not store.items:
-        details = "；".join(store.load_errors) if store.load_errors else "目录中没有xlsx文件"
-        raise RuntimeError(f"没有成功读取任何Excel，无法生成看板：{details}")
-    try:
+    with ExitStack() as resources:
+        resources.callback(store.close)
         stage_started = perf_counter()
-        subjects = discover_subjects(store, forecast_target_names(summary_path))
+        if disable_sales_forecast:
+            store.load(exclude_names={SUMMARY_NAME, FORECAST_SOURCE_PATH.name},
+                       data_only_view=config.get("chart_render_mode") == "generated")
+            source_count = len(store.items)
+        else:
+            metadata = resources.enter_context(current_forecast_snapshot(
+                input_dir, summary_path, config.get("forecast_as_of_date") or "", reuse_only=reuse_summary_only))
+            source_count = metadata["source_count"]
+            store.load_errors.extend(metadata["load_errors"])
+            for error in store.load_errors:
+                LOGGER.error("%s", error)
+        load_seconds = perf_counter() - stage_started
+        if not source_count:
+            details = "；".join(store.load_errors) if store.load_errors else "目录中没有xlsx文件"
+            raise RuntimeError(f"没有成功读取任何Excel，无法生成看板：{details}")
+        stage_started = perf_counter()
+        if disable_sales_forecast:
+            subjects = discover_subjects(store, forecast_target_names(summary_path))
+        else:
+            subjects = [Subject(**row) for row in metadata["subjects"]]
         discovery_seconds = perf_counter() - stage_started
         LOGGER.info("已识别分析主体 %d 个", len(subjects))
         LOGGER.debug("分析主体明细: %s", "、".join(subject.name for subject in subjects))
@@ -324,6 +346,10 @@ def _build(input_dir, output_file, *, disable_sales_forecast=False, campaign_rev
                 module_started = perf_counter()
                 try:
                     dashboard = module.build(store, subject)
+                except (SummaryDatabaseError, sqlite3.DatabaseError) as exc:
+                    if reuse_summary_only:
+                        raise ForecastSummaryNotCurrent from exc
+                    raise
                 except Exception as exc:
                     message = f"模块生成失败: 主体={subject.name}, 模块={module.label}, 错误={exc}"
                     runtime_warnings.append(message)
@@ -412,9 +438,10 @@ def _build(input_dir, output_file, *, disable_sales_forecast=False, campaign_rev
         )
         LOGGER.info("模块耗时: %s", module_summary)
         LOGGER.info(
-            "性能汇总: 预测刷新 %.2fs | Excel加载 %.2fs | 主体识别 %.2fs | 模块生成 %.2fs | "
+            "性能汇总: 预测刷新 %.2fs | %s加载 %.2fs | 主体识别 %.2fs | 模块生成 %.2fs | "
             "数据校验 %.2fs | HTML输出 %.2fs | 清单/诊断 %.2fs | 其他编排 %.2fs | 总计 %.2fs",
             refresh_seconds,
+            "Excel" if disable_sales_forecast else "SQLite",
             load_seconds,
             discovery_seconds,
             sum(module_seconds.values()),
@@ -425,8 +452,6 @@ def _build(input_dir, output_file, *, disable_sales_forecast=False, campaign_rev
             perf_counter() - build_started,
         )
         return manifest, warnings
-    finally:
-        store.close()
 
 
 def parse_args() -> argparse.Namespace:

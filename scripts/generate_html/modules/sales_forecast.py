@@ -168,7 +168,7 @@ def _read_model_master(path: Path | None = None) -> dict[str, dict[str, Any]]:
     if modern:
         result = {model_key(stage_name(r)): r for r in modern}
         return _primary_attributes(result)
-    if not source_available(source):
+    if not (active and Path(source) == active["path"]) and not source_available(source):
         return {}
     workbook = open_input(source, read_only=True, data_only=True)
     try:
@@ -1072,7 +1072,13 @@ def _history_item(record: dict[str, Any], processed: bool) -> dict[str, Any]:
 
 
 def _read_history() -> tuple[Path | None, list[dict[str, Any]]]:
-    path = input_path(next((candidate for candidate in map(preferred_source, HISTORY_CANDIDATES) if is_edition(candidate) or candidate.exists()), None))
+    active = ACTIVE_SUMMARY.get()
+    if active:
+        path = active["path"]
+    else:
+        candidate = next((path for path in map(preferred_source, HISTORY_CANDIDATES)
+                          if is_edition(path) or path.exists()), None)
+        path = input_path(candidate)
     if path is None or (is_edition(path) and not source_available(path)):
         return None, []
     workbook = open_input(path, read_only=False, data_only=True)
@@ -2771,6 +2777,9 @@ class SalesForecastModule:
     def build(self, store, subject: Subject) -> Dashboard | None:
         if subject.type != "group":
             return None
+        active = ACTIVE_SUMMARY.get()
+        if active is not None and active["path"] == self.summary_path and active.get("visible"):
+            return self._build_from_visible(active["workbook"], subject)
         if self.summary_path.exists():
             with summary_scope(self.summary_path) as summary:
                 if summary.get("visible"):

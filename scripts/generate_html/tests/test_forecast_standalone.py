@@ -163,6 +163,8 @@ class StandaloneForecastTests(TestCase):
                 refresh = stack.enter_context(patch.object(generator, "refresh_sales_forecast_data"))
                 stack.enter_context(patch.object(generator, "WorkbookStore", return_value=store))
                 stack.enter_context(patch.object(generator, "discover_subjects", return_value=subjects))
+                stack.enter_context(patch.object(generator, "current_forecast_snapshot", return_value=nullcontext({
+                    "subjects": [s.to_dict() for s in subjects], "load_errors": [], "source_count": 1})))
                 stack.enter_context(patch.object(generator, "forecast_target_names", return_value=[]))
                 stack.enter_context(patch.object(generator, "MODULES", modules))
                 stack.enter_context(patch.object(generator, "add_kpi_comparisons"))

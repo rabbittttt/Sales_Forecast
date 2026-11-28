@@ -59,9 +59,12 @@ class ProjectPathIsolationTests(TestCase):
             with patch.dict(os.environ, {"PLANHUB_APP_LOG_DIR": "../custom/logs/forecast"}):
                 self.assertEqual(data_paths.dynamic_log_directory(project), (project.parent / "custom/logs/forecast").resolve())
             self.assertEqual(dynamic, output / "dynamic")
+            self.assertEqual(data_paths.forecast_database_path(project), output / "sales-summary.sqlite3")
             (project.parent / "app-release.json").write_text("{}", encoding="utf8")
             with patch.dict(os.environ, {"SALES_FORECAST_DATA_DIR": "../deployed/database/forecast"}):
                 self.assertEqual(data_paths.dynamic_log_directory(project), (project.parent / "deployed/logs/forecast").resolve())
+                self.assertEqual(data_paths.forecast_database_path(project),
+                                 (project.parent / "deployed/database/forecast/sales-summary.sqlite3").resolve())
             self.assertNotEqual(static, dynamic)
             self.assertFalse(static.is_relative_to(dynamic))
             self.assertFalse(dynamic.is_relative_to(static))
@@ -86,6 +89,19 @@ class ProjectPathIsolationTests(TestCase):
                 with self.assertRaisesRegex(ValueError, "只读"):
                     WorkbookStore(shared, cache_dir=shared / ".cache")
                 self.assertFalse(shared.exists())
+
+    def test_forecast_database_file_link_cannot_redirect_publication(self):
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {"SALES_FORECAST_DATA_DIR": directory}):
+            path = data_paths.forecast_database_path()
+            source = Path(directory) / "campaigns.sqlite3"
+            source.write_bytes(b"upstream")
+            try:
+                path.symlink_to(source)
+            except OSError as exc:
+                self.skipTest(f"file symlinks unavailable: {exc}")
+            with self.assertRaisesRegex(ValueError, "不能指向"):
+                data_paths.forecast_database_path()
+            self.assertEqual(source.read_bytes(), b"upstream")
 
     def test_cache_and_inputs_are_separate_during_real_excel_read(self):
         with TemporaryDirectory() as directory:

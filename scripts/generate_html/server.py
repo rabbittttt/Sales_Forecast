@@ -18,7 +18,7 @@ import webbrowser
 
 from core.data_paths import (
     PROJECT_ROOT, assert_output_is_private, orders_input_directory,
-    dynamic_output_directory, dynamic_log_directory, excel_cache_directory, forecast_summary_path,
+    dynamic_output_directory, dynamic_log_directory, excel_cache_directory, forecast_summary_path, forecast_database_path,
     forecast_reference_directory, model_information_directory,
 )
 from core.config import SUMMARY_REUSE_UNAVAILABLE
@@ -92,7 +92,7 @@ def main() -> int:
                           lambda: build_page(input_dir, live_dir),
                           output_file=live_dir / FORECAST_PAGE_NAME,
                           service_version=service_version, page_version=page_version,
-                          cache_files=(forecast_summary_path(PROJECT_ROOT),),
+                          cache_files=(forecast_summary_path(PROJECT_ROOT), forecast_database_path(PROJECT_ROOT)),
                           build_from_current_summary=lambda: build_page(input_dir, live_dir, reuse_summary_only=True))
     try:
         server = ForecastServer((args.host, args.port), monitor, live_dir / "forecast_assets", instance_id, args.public_prefix,
@@ -127,6 +127,7 @@ def main() -> int:
                     forecast_reference_directory(PROJECT_ROOT), model_information_directory(PROJECT_ROOT))
         LOGGER.info("共享汇总=%s；动态网页=%s；共享导入库=%s", forecast_summary_path(PROJECT_ROOT),
                     live_dir / FORECAST_PAGE_NAME, import_db)
+        LOGGER.info("销量汇总数据库=%s", forecast_database_path(PROJECT_ROOT))
         LOGGER.info("汇总刷新缓存=%s；服务日志=%s", excel_cache_directory(PROJECT_ROOT), log_dir / "live_server.log")
         monitor.restore()
         if monitor.page()[0] is None:

@@ -95,6 +95,7 @@
 | 小订与首销 | `../工作台数据/database/vehicle-config/campaigns/campaigns.sqlite3` | 只读车型配置中已发布的数据。首次使用前在车型配置完成发布。设置 `PLANHUB_DATA_ROOT` 可更换数据根，`VEHICLE_CONFIG_CAMPAIGN_DB` 可直接指定数据库路径。历史重放可用 `--source` 指定工作簿或已发布 JSON，或用 `VEHICLE_CONFIG_CAMPAIGN_SNAPSHOT` 指定快照。生成器的 `--input` 只切换订单输入 |
 | 车型资料 | `../工作台数据/shared/车型信息/` | 跟随共享根，已维护的车型属性优先取整理表 |
 | 派生销量汇总 | `../工作台数据/shared/订单汇总/鸿蒙智行销量数据汇总.xlsx` | 跟随共享根，独立刷新工具支持 `--output` |
+| 预测页面读取的销量汇总数据库 | `../工作台数据/database/forecast/sales-summary.sqlite3` | 静态和动态生成器共用预测持久根，可用 `SALES_FORECAST_DATA_DIR` 设置。动态服务的 `--data-dir` 设置同一位置 |
 | 静态 HTML 与日志 | `output_file/static/鸿蒙智行销量预测.html`、同级 `log/` | 生成器 `--output`、`--log-dir` |
 | 动态结果、启动检查点、共享外部导入 | `../工作台数据/database/forecast/dynamic/` | `--data-dir` 或 `SALES_FORECAST_DATA_DIR` 指定预测持久根 |
 | 动态日志 | `../工作台数据/logs/forecast/` | `PLANHUB_APP_LOG_DIR` |
@@ -103,6 +104,8 @@
 默认整理表文件名缺失时，生成器在同目录筛选含“小订”或“首销”的工作簿，优先含“数据整理”的文件；临时文件、副本、修正前版本、订单报表、映射与二次处理文件均排除。只采用筛选后的唯一候选，并在日志记录文件名；无候选或存在多个候选时报告错误。
 
 共享目录中的原始工作簿只读。生成器只向共享目录发布上述派生销量汇总。已发布的汇总可由其他项目读取。整理表和订单输入缺失时，页面诊断会报告具体来源。当前静态预测页面可单文件打开；旧版离线页面若仍在使用，应与自己的资源目录一同保留。
+
+默认刷新用同一批计算结果生成共享 Excel 和私有 SQLite。SQLite 保存汇总工作表及页面使用的车型信息。静态和动态生成器核对输入版本和共享 Excel 的内容摘要后，从匹配的 SQLite 批次读取数据并生成 HTML。常规刷新遇到数据库缺失或损坏时，会校验现有 Excel，能复用就从它恢复数据库。显式导出到自定义 Excel 路径时只生成该工作簿。网页手工导入的外部预测仍由独立的导入库保存。
 
 ## 盘中预测
 

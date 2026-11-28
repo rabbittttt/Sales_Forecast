@@ -251,6 +251,30 @@ class PublicForecastTablesTests(TestCase):
             self.assertEqual(data['small_order_history'][0]['daily_orders'], [0, 10])
         book.close()
 
+    def test_sqlite_batch_preserves_entire_forecast_board_and_source_names(self):
+        from core.forecast_summary import summary_scope
+        from core.models import Subject
+        from core.summary_sqlite import open_workbook, publish_workbook
+        from modules.sales_forecast import SalesForecastModule
+
+        book = self.make_public()
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / '鸿蒙智行销量数据汇总.xlsx'
+            database = Path(folder) / 'forecast.sqlite3'
+            book.save(path)
+            subject = Subject('group', '鸿蒙智行', 'group')
+            module = SalesForecastModule()
+            module.summary_path = path
+            module.as_of_date = date(2026, 1, 4)
+            expected = module.build(None, subject).to_dict()
+            metadata = {'subjects': [subject.to_dict()], 'load_errors': [], 'source_count': 1}
+            publish_workbook(database, book, source_path=path, signature='fixture', metadata=metadata)
+            with open_workbook(database, source_path=path, signature='fixture') as batch, summary_scope(path, batch), \
+                 patch('core.forecast_summary.load_workbook', side_effect=AssertionError('不能重读 Excel')), \
+                 patch('modules.sales_forecast.stage_records', side_effect=AssertionError('不能重读原始数据')):
+                self.assertEqual(module.build(None, subject).to_dict(), expected)
+        book.close()
+
     def test_missing_launch_date_keeps_actuals_without_relative_cancel_curve(self):
         from core.model_identity import model_key
         for invalid in (None, '', 'not-a-date'):

@@ -16,9 +16,12 @@ else:
     import fcntl
 
 
-@contextmanager
 def build_lock(project_root: Path = PROJECT_ROOT):
-    path = project_output_directory(project_root) / ".build.lock"
+    return file_lock(project_output_directory(project_root) / ".build.lock")
+
+
+@contextmanager
+def file_lock(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
         if handle.tell() == 0:
