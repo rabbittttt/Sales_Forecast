@@ -51,6 +51,9 @@ async function checkLayout(page, frame, {singleCampaign}) {
         stagesTop: rect('#moduleNav').top,
         navFits: ['#moduleNav','.forecast-target-tabs'].every(selector => {
           const nav = document.querySelector(selector);
+          if (selector === '#moduleNav' && innerWidth <= 600) {
+            return nav.clientWidth >= nav.querySelector('button').offsetWidth && getComputedStyle(nav).overflowX === 'auto';
+          }
           return nav.scrollWidth <= nav.clientWidth + 1;
         }),
         navOffset: Math.abs(rect('#moduleNav').y + rect('#moduleNav').height/2 -
