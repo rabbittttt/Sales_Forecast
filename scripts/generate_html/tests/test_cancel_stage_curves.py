@@ -69,7 +69,7 @@ class CancelStageCurvesTests(TestCase):
         self.assertIn(SMALL_CANCEL_DAILY_SHEET, book.sheetnames)
         self.assertEqual(book.sheetnames[book.sheetnames.index('小订当日数量')+1], SMALL_CANCEL_DAILY_SHEET)
         self.assertEqual(self.values(book, SMALL_CANCEL_DAILY_SHEET), [2, 0])
-        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET, 3), [18, 2, 0])
+        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET, 3), [7, 2, 0])
         self.assertNotIn('退订当日数量', book.sheetnames)
         for name in (SMALL_CANCEL_DAILY_SHEET, LAUNCH_CANCEL_DAILY_SHEET):
             headers = [c.value for c in book[name][1]]

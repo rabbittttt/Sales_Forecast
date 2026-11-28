@@ -382,7 +382,7 @@ def public_forecast_tables(book, data, emit, weekly_rows=(), as_of_date=None, ra
         ["口径", "订单by天", "同代际同日期一行，逐字段按优先级选值；选配比例表覆盖范围内省略日期按0。未更新日期及显式空白不补0。by时保存小时数量及已知小时分项，不存累计列；by天的首销分时核对列记录可用于完整日核对的分项。", None, None],
         ["口径", "参考曲线", "小订累计完成度、小订当日数量按小订窗口排列D1、D2；已有日量和可计算比例均保留，分母未知才留空。进行中、当日或未来数据不作为完整终局参考；参考来源与终值资格见车型基本信息，D1/D2另标口径状态。", None, None],
         ["口径", "小订退订", "两套退订指标均只含小订退订。首销期累计退订率按首销开始日排列D1，小订期累计退订率按小订开始日排列D1，各截取对应维护窗口；分母均为总小订。日量优先取整理表对应阶段的退订进度，缺值再取小订退订分析，真实0有效；累计只用兼容的真实累计，不混入大定退订。", None, None],
-        ["口径", "首销期退订数量", "首销期退订当日数量的D1为截至首销D1的累计小订退订（含首销前），D2起为当日新增；by天和首销D1/D2指标仍保存真实当日量。", None, None],
+        ["口径", "首销期退订数量", "首销期退订当日数量从首销开始日 D1 起，逐日记录当天新增的小订退订，已知为零记 0，未知留空。首销期累计退订率计入已知的首销前累计退订。", None, None],
         ["口径", "小订期退订数量", "小订期退订当日数量按小订开始日排列D1，仅保留小订维护窗口内的小订退订日量；优先取整理表的小订期退订进度，缺值再取小订退订分析，真实0保留、未知留空。", None, None],
         ["口径", "小订及首销前", "整理表真实小订by天 → 小订选配比例by天 → 小订退订分析分时按日汇总；整理表须同一小订开始日期及维护窗口。D1分时只取小订分时退订。", None, None],
         ["口径", "首销窗口", "整理表 → 首销期订单节奏 → 对应大定/锁单选配比例表补缺；退订独立取数。进入平销不改变历史首销日的优先级。", None, None],
@@ -1050,12 +1050,7 @@ def refresh_reference_tables(book, data, emit, daily, today):
         derived["小转大当日数量"].append([name, *s])
         derived["直接大定当日数量"].append([name, *d])
         derived[GROSS_DAILY_SHEET].append([name, *g])
-        # Seed the exported roll-forward at launch D1, not at the latest date.
-        # Keep c unchanged: by-day facts and D1/D2 features are actual daily counts.
-        cancel_export = list(c)
-        if cancel_export:
-            cancel_export[0] = cumulative_counts["退订数量"][0]
-        derived[LAUNCH_CANCEL_DAILY_SHEET].append([name, *cancel_export])
+        derived[LAUNCH_CANCEL_DAILY_SHEET].append([name, *c])
         for title, field, denominator in (("小转大累计完成度", "小转大", "总小转大"), ("直接大定累计完成度", "直接大定", "总直接大定"),
             (GROSS_PROGRESS_SHEET, "大定", "总大定"), ("累计小订转化率", "小转大", "总小订"), (LAUNCH_CANCEL_SHEET, "退订数量", "总小订")):
             progress = [safe_div(value, r.get(denominator)) for value in cumulative_counts[field]]

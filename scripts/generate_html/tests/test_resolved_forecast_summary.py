@@ -8,7 +8,7 @@ from openpyxl import Workbook
 
 from core.excel import WorkbookItem, _merge_matrix
 from core.forecast_summary import (DAILY_SHEET, MASTER_SHEET, SMALL_HOURLY_SHEET,
-    LAUNCH_HOURLY_SHEET, D12_SHEET, table_records, resolved_weekly_rows)
+    LAUNCH_HOURLY_SHEET, LAUNCH_CANCEL_DAILY_SHEET, D12_SHEET, table_records, resolved_weekly_rows)
 from tests import test_public_forecast_tables
 
 
@@ -128,6 +128,7 @@ class ResolvedSummaryTests(TestCase):
             raw['cancel_source'] = {'file': '小订退订分析.xlsx', 'sheet': '测试车日度退订'}
         book = self.make(customize)
         self.assertIsNone(table_records(book, D12_SHEET)[0]['D1退订'])
+        self.assertIsNone(table_records(book, LAUNCH_CANCEL_DAILY_SHEET)[0]['D1'])
         self.assertAlmostEqual(table_records(book, '累计退订率')[0]['D1'], .38)
         book.close()
 

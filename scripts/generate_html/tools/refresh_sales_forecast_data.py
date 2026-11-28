@@ -1433,8 +1433,7 @@ def audit_source_retention(workbook, raw_profiles):
 
     Lower-priority conflicts may legitimately change a value, but cannot make
     a known in-window field disappear. Derived quantity tables must match the
-    selected day facts, except cancellation D1 is the launch-date cumulative
-    seed. This is independent of eligibility for web prediction.
+    selected day facts. This is independent of eligibility for web prediction.
     """
     from core.forecast_summary import MASTER_SHEET, D12_SHEET, LAUNCH_HOURLY_SHEET, ORDER_FIELDS, DAILY_FIELD_LABELS, iso_day, calendar_day
     valid = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
@@ -1486,17 +1485,9 @@ def audit_source_retention(workbook, raw_profiles):
         selected = [daily.get((model, (start+timedelta(days=i)).isoformat()), {}) for i in range((end-start).days+1)]
         for i, row in enumerate(selected, 1):
             for label, sheet in (("小转大", "小转大当日数量"), ("直接大定", "直接大定当日数量"), ("大定", GROSS_DAILY_SHEET), ("退订数量", LAUNCH_CANCEL_DAILY_SHEET)):
-                if label == "退订数量" and i == 1:
-                    seed = quantities[sheet].get(model, {}).get("D1")
-                    rate = curves[LAUNCH_CANCEL_SHEET].get(model, {}).get("D1")
-                    denominator = master.get("总小订")
-                    if valid(rate) and valid(denominator) and denominator > 0:
-                        if not valid(seed) or not math.isclose(seed, rate*denominator, rel_tol=1e-12, abs_tol=1e-8):
-                            missing(model, sheet, "D1累计退订基数未同步", "D1")
-                    elif valid(row.get(label)) and (not valid(seed) or seed < row[label]):
-                        missing(model, sheet, "D1累计退订基数缺失或小于当日量", "D1")
-                    continue
-                if valid(row.get(label)) and quantities[sheet].get(model, {}).get(f"D{i}") != row[label]:
+                expected = row.get(label)
+                saved = quantities[sheet].get(model, {}).get(f"D{i}")
+                if (valid(expected) or label == "退订数量") and saved != expected:
                     missing(model, sheet, "日数量未同步", f"D{i}")
             if i <= 2:
                 for label, suffix in (("小转大", "小转大"), ("直接大定", "直接大"), ("大定", "大定"), ("退订数量", "退订")):

@@ -37,7 +37,7 @@ class LaunchQuantityReferenceMergeTests(TestCase):
                     {'date': '2026-01-04', 'cancel': 12, 'daily_cancel': 4},
                     {'date': '2026-01-05', 'cancel': 14, 'daily_cancel': 2}])
         self.assertEqual(self.values(book, '大定当日数量'), [10, 20, 0])
-        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [5, 4, 0])
+        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [2, 4, 0])
         for sheet, expected in (
             ('小转大累计完成度', [1/3, 1, 1]), ('直接大定累计完成度', [1/3, 1, 1]),
             ('大定累计完成度', [1/3, 1, 1]), ('累计小订转化率', [.2, .6, .6]),
@@ -68,7 +68,7 @@ class LaunchQuantityReferenceMergeTests(TestCase):
             history={LAUNCH_CANCEL_DAILY_SHEET: {'测试车': [974, 10, 0]}},
             cancel=[{'date': '2026-01-02', 'cancel': 2646, 'daily_cancel': 347},
                     {'date': '2026-01-03', 'cancel': 3620, 'daily_cancel': 974}])
-        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [3620, 10, 0])
+        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [974, 10, 0])
         self.assertEqual(self.values(book, '累计退订率'), [3620/24088, 3630/24088, 3630/24088])
         self.assertEqual(table_records(book, MASTER_SHEET)[0]['总退订'], 3630)
         first = next(r for r in table_records(book, DAILY_SHEET) if r['日期'].date() == date(2026, 1, 3))
@@ -76,7 +76,7 @@ class LaunchQuantityReferenceMergeTests(TestCase):
         self.assertEqual(table_records(book, D12_SHEET)[0]['D1退订'], 974)
         counts = self.values(book, LAUNCH_CANCEL_DAILY_SHEET)
         for i, rate in enumerate(self.values(book, '累计退订率'), 1):
-            self.assertAlmostEqual(sum(counts[:i])/24088, rate)
+            self.assertAlmostEqual((2646 + sum(counts[:i])) / 24088, rate)
         self.assertEqual(self.cancel_export_issues(book), [])
 
     def test_first_source_cumulative_and_daily_establish_prelaunch_baseline(self):
@@ -84,12 +84,12 @@ class LaunchQuantityReferenceMergeTests(TestCase):
             history={LAUNCH_CANCEL_DAILY_SHEET: {'测试车': [2, 3, 0]}},
             cancel=[{'date': '2026-01-03', 'cancel': 25, 'daily_cancel': 5}])
         self.assertEqual(self.values(book, '累计退订率'), [.22, .25, .25])
-        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [22, 3, 0])
+        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [2, 3, 0])
 
     def test_cumulative_d1_seed_does_not_replace_true_daily_d1_in_facts_or_scoring(self):
         book = self.build(small_total=100, history={LAUNCH_CANCEL_DAILY_SHEET: {'测试车': [32, None, None]}},
                           cancel=[{'date': '2026-01-03', 'cancel': 38}])
-        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [38, None, None])
+        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [32, None, None])
         self.assertEqual(self.values(book, '累计退订率'), [.38, None, None])
         self.assertEqual(table_records(book, D12_SHEET)[0]['D1退订'], 32)
 
@@ -97,24 +97,25 @@ class LaunchQuantityReferenceMergeTests(TestCase):
         book = self.build(history={LAUNCH_CANCEL_DAILY_SHEET: {'测试车': [0, 2, 0]}},
             cancel=[{'date': '2026-01-02', 'cancel': 8},
                     {'date': '2026-01-03', 'cancel': 8, 'daily_cancel': 0}])
-        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [8, 2, 0])
+        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [0, 2, 0])
+        self.assertEqual(self.values(book, '累计退订率'), [.4, .5, .5])
         self.assertEqual(table_records(book, D12_SHEET)[0]['D1退订'], 0)
         self.assertEqual(self.cancel_export_issues(book), [])
 
-    def test_d1_seed_does_not_depend_on_total_small_or_take_latest_cumulative(self):
+    def test_d1_daily_count_does_not_depend_on_total_small_or_later_observations(self):
         book = self.build(small_total=None, raw_fields={'small_daily_days': [], 'small_daily_sources': {}},
             cancel=[{'date': '2026-01-03', 'cancel': 8, 'daily_cancel': 2},
                     {'date': '2026-01-04', 'cancel': 11, 'daily_cancel': 3}])
-        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [8, 3, None])
+        self.assertEqual(self.values(book, LAUNCH_CANCEL_DAILY_SHEET), [2, 3, None])
         self.assertEqual(self.values(book, '累计退订率'), [None, None, None])
         self.assertEqual(self.cancel_export_issues(book), [])
         later = self.build(cancel=[{'date': '2026-01-05', 'cancel': 12, 'daily_cancel': 2}])
         self.assertEqual(self.values(later, LAUNCH_CANCEL_DAILY_SHEET), [None, None, 2])
 
-    def test_retention_audit_detects_missing_or_daily_instead_of_cumulative_d1(self):
+    def test_retention_audit_detects_missing_or_cumulative_instead_of_daily_d1(self):
         book = self.build(cancel=[{'date': '2026-01-03', 'cancel': 8, 'daily_cancel': 2}])
         self.assertEqual(self.cancel_export_issues(book), [])
-        for wrong in (None, 2):
+        for wrong in (None, 8):
             with self.subTest(value=wrong):
                 book[LAUNCH_CANCEL_DAILY_SHEET]['B2'] = wrong
                 self.assertTrue(any(LAUNCH_CANCEL_DAILY_SHEET in message and 'D1' in message
