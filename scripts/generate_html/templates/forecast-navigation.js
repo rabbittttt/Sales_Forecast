@@ -115,7 +115,7 @@
       $('#moduleSelect').onchange=event=>$('#moduleNav').querySelector(`[data-forecast-nav="${event.target.value}"]`)?.click();
       $('#moduleNav').innerHTML=options.map(option=>{
         const active=state.forecastStage===option.id;
-        return `<button type="button" data-forecast-nav="${option.id}" class="${active?'active':''}"${active?' aria-current="page"':''}><svg class="module-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${forecastNavIcons[option.id]}"/></svg>${option.label}</button>`;
+        return `<button type="button" data-forecast-nav="${option.id}" aria-label="${option.label}" class="${active?'active':''}"${active?' aria-current="page"':''}><svg class="module-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${forecastNavIcons[option.id]}"/></svg><span>${option.label.replace(/预测$/, '<span class="forecast-stage-suffix">预测</span>')}</span></button>`;
       }).join('');
       $('#moduleNav').onclick=async event=>{
         const button=event.target.closest('[data-forecast-nav]'),id=button?.dataset.forecastNav;if(!forecastStages.some(stage=>stage.id===id))return;captureForecastDraft();

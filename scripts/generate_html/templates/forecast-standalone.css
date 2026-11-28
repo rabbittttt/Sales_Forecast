@@ -700,39 +700,61 @@ body.forecast-app #forecastHeaderTools .forecast-target-tabs {
   }
 }
 
-/* Both sets of top-level controls scroll within the header at narrow widths. */
-body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) {
-  display:flex; flex-flow:row nowrap; align-items:center; justify-content:flex-start;
-  gap:2px; min-width:0; max-width:100%; height:56px; padding:0; margin:0;
-  overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:contain; scrollbar-width:none;
-  background:#fff; border:0; border-radius:0;
+/* Stage selection and its subordinate views share a single navigation row. */
+body.forecast-app .module-bar #moduleNav,
+body.forecast-app .module-bar #forecastHeaderTools .forecast-target-tabs {
+  display:flex; align-items:center; flex-flow:row nowrap; justify-content:flex-start;
+  gap:2px; min-width:0; max-width:100%; height:auto; margin:0; padding:0;
+  background:transparent; border:0; border-radius:0; overflow-x:auto; scrollbar-width:thin;
 }
-body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs)::-webkit-scrollbar {display:none}
-body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) button {
-  display:inline-flex; align-items:center; justify-content:center; gap:7px;
-  box-sizing:border-box; flex:0 0 auto; height:56px; min-height:56px; padding:0 16px;
-  font-size:14px; font-weight:400; color:var(--muted); white-space:nowrap;
-  border:0; border-bottom:2.5px solid transparent; border-radius:0;
-  background:transparent; box-shadow:none;
-  transition:color .16s ease,border-color .16s ease,background-color .16s ease;
+body.forecast-app .module-bar #forecastHeaderTools .forecast-target-tabs {
+  padding-inline-start:12px; border-inline-start:1px solid var(--line);
 }
-body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) button:not(:disabled):hover,
-body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) button[aria-current="page"] {
-  background:var(--primary-soft); color:var(--primary-strong);
+body.forecast-app .module-bar #moduleNav button,
+body.forecast-app #forecastHeaderTools .forecast-target-tabs button {
+  display:inline-flex; align-items:center; justify-content:center; gap:6px; flex:none;
+  width:auto; min-height:40px; height:auto; white-space:nowrap; box-shadow:none;
 }
-body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) button[aria-current="page"] {
-  font-weight:700; border-bottom-color:var(--primary);
+body.forecast-app .module-bar #moduleNav button {
+  padding:0 13px; font-size:15px; font-weight:600; color:var(--ink);
+  border:0; border-radius:8px; background:transparent;
 }
-body.forecast-app #moduleNav .module-icon {opacity:.8}
-body.forecast-app #moduleNav [aria-current="page"] .module-icon {opacity:1}
-@media(max-width:760px){
+body.forecast-app .module-bar #moduleNav button[aria-current="page"] {
+  background:var(--primary); color:white;
+}
+body.forecast-app #forecastHeaderTools .forecast-target-tabs button {
+  padding:0 8px; font-size:13px; font-weight:400; color:var(--muted);
+  border:0; border-radius:0; background:transparent;
+}
+body.forecast-app #forecastHeaderTools .forecast-target-tabs button[aria-selected=true] {
+  color:var(--primary-strong); font-weight:600; box-shadow:inset 0 -2px var(--primary);
+}
+body.forecast-app .module-bar #moduleNav button:not([aria-current]):hover,
+body.forecast-app #forecastHeaderTools .forecast-target-tabs button:hover {background:var(--primary-soft)}
+@media(max-width:1150px){
   body.forecast-app .module-bar:has(#forecastHeaderTools) {
-    padding-block:0; grid-template-areas:"stage stage" "views views" "tools reset";
+    height:auto; padding-block:4px; grid-template-columns:auto minmax(0,1fr); grid-template-areas:"stage views" "tools reset"; gap:4px 8px;
   }
   body.forecast-app .module-bar:has(.forecast-refresh-status) {
-    grid-template-areas:"stage stage" "views views" "tools reset" "time time";
+    grid-template-areas:"stage views" "tools reset" "time time";
   }
+  .forecast-header-status {justify-self:start; max-inline-size:none; flex-direction:row; align-items:center}
 }
-@media(prefers-reduced-motion:reduce){
-  body.forecast-app .module-bar :is(#moduleNav, #forecastHeaderTools .forecast-target-tabs) button {transition:none}
+@media(min-width:1001px) and (max-width:1150px){
+  body.forecast-app .module-bar:has(#forecastHeaderTools) {grid-template-columns:auto 1fr auto; grid-template-areas:"stage views views" "time tools reset"}
+}
+@media(max-width:600px){
+  body.forecast-app .module-bar:has(#forecastHeaderTools) {grid-template-columns:auto minmax(0,1fr); column-gap:4px; padding-inline-start:8px}
+  body.forecast-app .module-bar #moduleNav button .module-icon,
+  body.forecast-app #moduleNav .forecast-stage-suffix {display:none}
+  body.forecast-app .module-bar #moduleNav button {padding:0 3px; font-size:14px}
+  body.forecast-app .module-bar #forecastHeaderTools .forecast-target-tabs {padding-inline-start:4px}
+  body.forecast-app #forecastHeaderTools .forecast-target-tabs button {padding:0 3px; font-size:12px}
+  body.forecast-app .module-bar #moduleNav button,
+  body.forecast-app #forecastHeaderTools .forecast-target-tabs button {min-height:44px}
+}
+@media(max-width:380px){
+  body.forecast-app .module-bar:has(#forecastHeaderTools) {grid-template-columns:108px minmax(0,1fr); column-gap:2px}
+  body.forecast-app #forecastHeaderTools .forecast-target-tabs button {padding-inline:2px}
+  .forecast-header-status {grid-column:1/-1; justify-self:start; max-width:calc(100% - 96px); flex-wrap:wrap}
 }

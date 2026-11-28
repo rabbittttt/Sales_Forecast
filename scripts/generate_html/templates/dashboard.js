@@ -1206,7 +1206,7 @@
       }
       for(const block of page.querySelectorAll('.forecast-score-rules,.forecast-score-rule-box,.forecast-score-formula,[data-score-explanation]'))methodology.append(block);
     }
-    pages.at(-1).append(methodology);
+    pages[0].prepend(methodology);
   }
   function renderLifecycleScorePage(...groups){
     const container=document.createElement('div');
@@ -1216,7 +1216,7 @@
   }
   function renderScorePart(label, part, contribution) {
     if (!part) return `<span class="forecast-score-part unavailable"><b>${esc(label)}</b><small>缺少可比数据</small></span>`;
-    return `<span class="forecast-score-part"><b>${esc(label)}</b><em>相似度 ${Math.round(part.value*100)}% · 贡献 ${contribution.toFixed(1)}分</em><small>${esc(part.evidence)}</small></span>`;
+    return `<span class="forecast-score-part"><b>${esc(label)}</b><em>贡献 ${contribution.toFixed(1)}分</em><small>${esc(part.evidence)}</small><span class="forecast-score-part-meta">相似度 ${Math.round(part.value*100)}% · ${Number.isFinite(part.weight) ? `配置权重 ${Math.round(part.weight*100)}%` : '等权'}</span></span>`;
   }
   function lifecycleScoreMarkup({title,referenceScope='',orderLabel='按有效总分降序',description,rules,rows,selected,empty,minimumEvidence=3,weighted=false}){
     const scoreBar=(score,label)=>`<div class="forecast-score-bar" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(score*100)}"><i style="width:${Math.max(0,Math.min(score,1))*100}%"></i><b>${Math.round(score*100)}分</b></div>`;

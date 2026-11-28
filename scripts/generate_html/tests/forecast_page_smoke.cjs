@@ -48,9 +48,16 @@ async function checkLayout(page, frame, {singleCampaign}) {
         viewport: innerWidth, scroll: document.documentElement.scrollWidth,
         subjectRight: rect('#subjectSelect').right, paramsLeft: rect('#forecastNavParameters').left,
         paramsRight: rect('#forecastNavParameters').right, resetRight: rect('[data-forecast-reset]').right,
-        stagesTop: rect('#moduleNav').top, modelBottom: rect('#subjectSelect').bottom,
+        stagesTop: rect('#moduleNav').top,
+        navFits: ['#moduleNav','.forecast-target-tabs'].every(selector => {
+          const nav = document.querySelector(selector);
+          return nav.scrollWidth <= nav.clientWidth + 1;
+        }),
+        navOffset: Math.abs(rect('#moduleNav').y + rect('#moduleNav').height/2 -
+          rect('.forecast-target-tabs').y - rect('.forecast-target-tabs').height/2), modelBottom: rect('#subjectSelect').bottom,
       };
     });
+    assert(layout.navFits && layout.navOffset <= 1, JSON.stringify(layout));
     assert(layout.scroll <= width + 1 && layout.viewport === width, JSON.stringify(layout));
     assert(layout.subjectRight <= layout.paramsLeft + 1 && layout.modelBottom <= layout.stagesTop + 1, JSON.stringify(layout));
     assert(Math.abs(layout.paramsRight - layout.resetRight) <= 1, JSON.stringify(layout));
@@ -115,10 +122,10 @@ async function checkLayout(page, frame, {singleCampaign}) {
         for (const score of await scores.all()) {
           assert.equal(await score.locator('.forecast-score-hero').count(), 0);
           assert(await score.locator(':scope > :first-child').evaluate(el =>
-            el.matches('.forecast-score-summary,.forecast-score-detail')));
+            el.matches('.forecast-score-methodology,.forecast-score-summary,.forecast-score-detail')));
         }
         assert.equal(await scores.locator('.forecast-score-methodology').count(), 1);
-        const methodology = scores.last().locator(':scope > details.forecast-score-methodology:last-child');
+        const methodology = scores.first().locator(':scope > details.forecast-score-methodology:first-child');
         assert(await methodology.evaluate(el => el.open));
         const formulas = methodology.locator('.forecast-score-formula');
         assert.equal(await formulas.count(), stage === 'small' ? 2 : 1);
@@ -126,6 +133,23 @@ async function checkLayout(page, frame, {singleCampaign}) {
         const candidateDetails = scores.locator('.forecast-score-detail-table .forecast-score-row-details');
         assert.equal(await candidateDetails.locator('xpath=self::*[not(@open)]').count(), 0);
         assert.equal(await scores.locator('.forecast-score-detail-table .forecast-score-part-rule').count(), 0);
+        const metrics = scores.locator('.forecast-score-parts:visible').first();
+        if (await metrics.count()) {
+          for (const width of [1440, 390]) {
+            await page.setViewportSize({width, height:900});
+            const bounds = await metrics.evaluate(grid => {
+              const card = grid.firstElementChild;
+              const box = grid.getBoundingClientRect();
+              return {left:box.left, right:box.right, columns:getComputedStyle(grid).gridTemplateColumns.split(' ').length,
+                border:getComputedStyle(card).borderTopWidth, rowWidth:grid.closest('tr').getBoundingClientRect().width,
+                width:box.width};
+            });
+            assert(bounds.left >= 0 && bounds.right <= width && bounds.width >= bounds.rowWidth - 32, JSON.stringify(bounds));
+            assert.equal(bounds.columns, width === 390 ? 1 : 3);
+            assert.equal(bounds.border, '1px');
+          }
+          await page.setViewportSize({width:1440, height:900});
+        }
         if (stage === 'small') {
           const scopes = await scores.locator('.forecast-score-scope').allTextContents();
           assert.equal(scopes.length, 2);
