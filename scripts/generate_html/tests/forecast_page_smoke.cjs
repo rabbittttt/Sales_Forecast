@@ -138,7 +138,7 @@ async function checkLayout(page, frame, {singleCampaign}) {
         assert.equal(await scores.locator('.forecast-score-detail-table .forecast-score-part-rule').count(), 0);
         const metrics = scores.locator('.forecast-score-parts:visible').first();
         if (await metrics.count()) {
-          for (const width of [1440, 390]) {
+          for (const [width, columns] of [[1440, 4], [768, 2], [390, 1]]) {
             await page.setViewportSize({width, height:900});
             const bounds = await metrics.evaluate(grid => {
               const card = grid.firstElementChild;
@@ -148,7 +148,7 @@ async function checkLayout(page, frame, {singleCampaign}) {
                 width:box.width};
             });
             assert(bounds.left >= 0 && bounds.right <= width && bounds.width >= bounds.rowWidth - 32, JSON.stringify(bounds));
-            assert.equal(bounds.columns, width === 390 ? 1 : 3);
+            assert.equal(bounds.columns, columns);
             assert.equal(bounds.border, '1px');
           }
           await page.setViewportSize({width:1440, height:900});

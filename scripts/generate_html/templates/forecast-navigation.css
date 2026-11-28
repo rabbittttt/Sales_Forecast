@@ -933,7 +933,7 @@
 }
 .forecast-studio .forecast-score-detail-table td:last-child {grid-column:1/-1}
 .forecast-studio .forecast-score-row-details .forecast-score-parts {
-  display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px;
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px;
 }
 .forecast-studio .forecast-score-row-details .forecast-score-part {
   display:grid; grid-template-columns:minmax(0,1fr) auto; align-content:start; align-items:baseline;
