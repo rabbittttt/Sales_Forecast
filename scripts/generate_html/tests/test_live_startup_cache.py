@@ -113,6 +113,32 @@ class LiveStartupCacheTests(TestCase):
         self.assertEqual(monitor.status()["state"], "ready")
         self.assertTrue(self.state_file.exists())
 
+    def test_changed_service_or_legacy_checkpoint_renders_once_from_existing_summary(self):
+        self.publish()
+        checkpoint = json.loads(self.state_file.read_text(encoding="utf-8"))
+        original_page = self.output.read_bytes()
+        for old_version in ("previous-code", None):
+            with self.subTest(old_version=old_version):
+                saved = checkpoint.copy()
+                if old_version is None:
+                    saved.pop("service_version")
+                else:
+                    saved["service_version"] = old_version
+                self.state_file.write_text(json.dumps(saved), encoding="utf-8")
+                self.output.write_bytes(original_page)
+                full_build = Mock(side_effect=AssertionError("unexpected summary rebuild"))
+                render = Mock(return_value=b"<html>updated</html>")
+                for _ in range(2):
+                    monitor = LiveMonitor(lambda: self.current, full_build, output_file=self.output,
+                                          cache_files=(self.summary,), service_version="current-code",
+                                          build_from_current_summary=render)
+                    self.assertTrue(monitor.restore())
+                    monitor.tick()
+                    self.assertEqual(monitor.status()["state"], "ready")
+                    self.assertEqual(self.output.read_bytes(), render.return_value)
+                render.assert_called_once_with()
+                full_build.assert_not_called()
+
     def test_malformed_or_unsupported_checkpoint_never_skips_stability(self):
         self.publish()
         good = json.loads(self.state_file.read_text(encoding="utf-8"))

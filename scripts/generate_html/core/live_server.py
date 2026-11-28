@@ -178,7 +178,7 @@ class LiveMonitor:
                 for row in snapshot.files
             ):
                 return False
-            self._restored = (snapshot, saved["artifacts"])
+            self._restored = (snapshot, saved["artifacts"], saved.get("service_version", ""))
             self._last_snapshot = snapshot
             self._last_success_at = saved.get("last_success_at", "")
             return True
@@ -191,6 +191,7 @@ class LiveMonitor:
             return
         try:
             saved = {"schema_version": 1, "snapshot": asdict(snapshot),
+                     "service_version": self._service_version,
                      "revision": hashlib.sha256(content).hexdigest(),
                      "artifacts": self._cache_artifacts(), "last_success_at": published_at}
             _write_text_atomic(self.checkpoint_file, json.dumps(saved, ensure_ascii=False))
@@ -243,13 +244,16 @@ class LiveMonitor:
         self._next_scan = now + self.scan_interval
         reason, config_only = _input_changes(self._last_snapshot, current) if self._last_snapshot is not None else ("", False)
         if self._restored is not None:
-            snapshot, artifacts = self._restored
+            snapshot, artifacts, service_version = self._restored
             self._restored = None
             try:
                 if current == snapshot and artifacts == self._cache_artifacts():
-                    self._applied = current
-                    reason = "输入、业务日期与汇总均未变化，复用上次页面"
-                    LOGGER.info("输入、业务日期及汇总未变化，已恢复上次预测，无需等待或重新生成")
+                    if service_version == self._service_version:
+                        self._applied = current
+                        reason = "程序、输入、业务日期与汇总均未变化，复用上次页面"
+                        LOGGER.info(reason)
+                    else:
+                        reason = "程序版本变化，重新生成页面" if service_version else "上次页面未记录程序版本，重新生成页面"
                 elif current == snapshot:
                     reason = "共享销量汇总已变化"
             except OSError:
@@ -261,10 +265,10 @@ class LiveMonitor:
             return
         content = None
         if self._applied is None and self._build_from_current_summary is not None and not self._startup_summary_checked:
-            self._startup_summary_checked = True
             self._set_state("building", reason=reason)
             LOGGER.info("检查现有销量汇总，尝试生成当前版本页面")
             content = self._build_from_current_summary()
+            self._startup_summary_checked = True
         if content is None:
             if current != self._pending:
                 self._pending = current
