@@ -367,7 +367,7 @@ class SalesForecastStageTests(unittest.TestCase):
             summary.append(["测试车", datetime(2026, 9, 1), datetime(2026, 9, 2), 2, 100])
             daily = workbook.create_sheet("小订by天")
             daily.append(["小订", datetime(2026, 9, 1), datetime(2026, 9, 2), "合计"])
-            daily.append(["测试车", 40, 40, 80])
+            daily.append(["测试车", 40, 40, 999])
             workbook.save(path)
             workbook.close()
             with patch("modules.sales_forecast._read_model_mapping", return_value={}), patch("modules.sales_forecast._read_model_master", return_value={}):
@@ -377,7 +377,7 @@ class SalesForecastStageTests(unittest.TestCase):
         self.assertEqual(rows[0]["total_source"], "车型汇总")
         self.assertEqual(rows[0]["small_progress"], [.4, .8])
         self.assertEqual(rows[0]["d1_share"], .4)
-        self.assertIn("车型汇总总小订100与by天合计80不一致", "\n".join(logs.output))
+        self.assertIn("车型汇总总小订100与日期列求和80不一致", "\n".join(logs.output))
 
         with TemporaryDirectory() as directory:
             path = Path(directory) / "小订及首销数据整理.xlsx"
@@ -388,13 +388,13 @@ class SalesForecastStageTests(unittest.TestCase):
             summary.append(["测试车", datetime(2026, 9, 1), datetime(2026, 9, 2), 2])
             daily = workbook.create_sheet("小订by天")
             daily.append(["小订", datetime(2026, 9, 1), datetime(2026, 9, 2), "合计"])
-            daily.append(["测试车", 30, 40, 70])
+            daily.append(["测试车", 30, 40, 71])
             workbook.save(path)
             workbook.close()
             with patch("modules.sales_forecast._read_model_mapping", return_value={}), patch("modules.sales_forecast._read_model_master", return_value={}):
                 _, rows = _read_small_order_history(path)
         self.assertEqual(rows[0]["total"], 70)
-        self.assertEqual(rows[0]["total_source"], "小订by天合计")
+        self.assertEqual(rows[0]["total_source"], "小订by天日期列求和")
 
     def test_small_order_without_total_header_uses_every_date_column(self):
         with TemporaryDirectory() as directory:
@@ -410,13 +410,12 @@ class SalesForecastStageTests(unittest.TestCase):
             workbook.save(path)
             workbook.close()
             with patch("modules.sales_forecast._read_model_mapping", return_value={}), patch("modules.sales_forecast._read_model_master", return_value={}):
-                with self.assertLogs("modules.sales_forecast", level="INFO") as logs:
-                    _, rows = _read_small_order_history(path)
+                _, rows = _read_small_order_history(path)
         self.assertEqual(rows[0]["daily_orders"], [50, 30, 20])
         self.assertEqual(rows[0]["total"], 100)
-        self.assertIn("未提供合计列", "\n".join(logs.output))
+        self.assertEqual(rows[0]["total_source"], "小订by天日期列求和")
 
-    def test_small_order_blank_day_preserves_known_values_but_negative_rejects(self):
+    def test_small_order_blank_or_negative_day_preserves_other_known_values(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "小订及首销数据整理.xlsx"
             workbook = Workbook()
@@ -444,7 +443,10 @@ class SalesForecastStageTests(unittest.TestCase):
         self.assertEqual(unfinished["daily_orders"], [60, None])
         self.assertFalse(unfinished["total_complete"])
         self.assertEqual(unfinished["small_progress"], [None, None])
-        self.assertTrue(all(row["daily_actual"] is False for row in rows if row["model"] == "负数车"))
+        negative = next(row for row in rows if row["model"] == "负数车")
+        self.assertTrue(negative["daily_actual"])
+        self.assertEqual(negative["daily_orders"], [110, None])
+        self.assertEqual(negative["total"], 100)
         message = "\n".join(logs.output)
         self.assertIn("为负数", message)
 

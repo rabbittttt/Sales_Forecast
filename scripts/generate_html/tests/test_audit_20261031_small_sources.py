@@ -17,7 +17,7 @@ from tests import test_forecast_source_backfill_e2e as fixtures
 class SmallMaintainedCellTests(TestCase):
     model = '问界 M9 2026款'
 
-    def read(self, values, total=100, summary_total=100):
+    def read(self, values, total=100, summary_total=100, *, totals=None):
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         path = Path(temporary.name) / '小订及首销数据整理.xlsx'
@@ -27,14 +27,17 @@ class SmallMaintainedCellTests(TestCase):
         sheet.append(['代际名', '小订开始日期', '小订结束日期', '小订天数', '总小订'])
         sheet.append([self.model, date(2026, 9, 1), date(2026, 9, 3), 3, summary_total])
         sheet = book.create_sheet('小订by天')
-        sheet.append(['代际名', date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3), '合计'])
-        sheet.append([self.model, *values, total])
+        if totals is None:
+            totals = (('合计', total),)
+        sheet.append(['代际名', date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3),
+                      *[name for name, _ in totals]])
+        sheet.append([self.model, *values, *[value for _, value in totals]])
         book.save(path)
         book.close()
         before = sha256(path.read_bytes()).hexdigest()
         with patch('modules.sales_forecast._read_model_mapping', return_value={model_key(self.model): self.model}), \
              patch('modules.sales_forecast._read_model_master', return_value={}):
-            _, items = _read_small_order_history(path)
+            _, items = _read_small_order_history(path, today=date(2026, 9, 4))
         self.assertEqual(sha256(path.read_bytes()).hexdigest(), before)
         return items[0]
 
@@ -61,10 +64,11 @@ class SmallMaintainedCellTests(TestCase):
         self.assertEqual(item['small_progress'], [0, None, None])
 
     def test_missing_terminal_does_not_make_partial_daily_sum_a_final_total(self):
-        item = self.read([40, '待更新', 20], total=None, summary_total=None)
+        item = self.read([40, '待更新', 20], summary_total=None, totals=(('合计', 100), ('总计', 60)))
         self.assertTrue(item['daily_actual'])
         self.assertEqual(item['daily_orders'], [40, None, 20])
         self.assertFalse(item['total_complete'])
+        self.assertIsNone(item['reported_total'])
         self.assertEqual(item['small_progress'], [None, None, None])
 
     def test_complete_valid_record_remains_unchanged(self):
@@ -73,11 +77,15 @@ class SmallMaintainedCellTests(TestCase):
         self.assertTrue(item['total_complete'])
         self.assertEqual(item['small_progress'], [.4, .8, 1])
 
-    def test_contradictory_total_and_invalid_total_keep_existing_rejection(self):
-        for values, total in (([110, -10, 0], 100), ([40, None, 20], '待更新')):
-            with self.subTest(values=values, total=total):
-                item = self.read(values, total)
-                self.assertFalse(item['daily_actual'])
+    def test_summary_columns_do_not_affect_daily_facts_or_terminal_quantity(self):
+        for totals in ((('合计', None),), (('总计', 700),),
+                       (('总计', '待更新'), ('合计', -1)), (('合计', 61), ('总计', None))):
+            with self.subTest(totals=totals), self.assertNoLogs('modules.sales_forecast', level='WARNING'):
+                item = self.read([40, 0, 20], summary_total=None, totals=totals)
+                self.assertEqual(item['daily_orders'], [40, 0, 20])
+                self.assertEqual((item['total'], item['reported_total']), (60, 60))
+                self.assertEqual(item['total_source'], '小订by天日期列求和')
+                self.assertTrue(item['total_complete'])
 
 
 class SmallMaintainedCellEndToEndTests(TestCase):
@@ -90,6 +98,9 @@ class SmallMaintainedCellEndToEndTests(TestCase):
             book = load_workbook(path)
             book['小订by天'].cell(2, 2).value = first
             book['小订by天'].cell(2, 3).value = '待更新'
+            book['小订by天']['D2'] = '过期合计'
+            book['小订by天']['E1'] = '总计'
+            book['小订by天']['E2'] = 1
             book.save(path)
             book.close()
             source_digest['value'] = sha256(path.read_bytes()).hexdigest()

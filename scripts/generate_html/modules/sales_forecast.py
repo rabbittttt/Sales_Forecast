@@ -450,44 +450,10 @@ def _read_small_order_history(path: Path | None = None, *, today: date | None = 
                     "处理=异常单元格保留未知，其他有效日量保留；缺值按既有来源优先级补缺，不改写为0",
                     label, sheet.title, row_number, "；".join(invalid_daily),
                 )
-            total_columns = [
-                index for index, value in enumerate(current_header)
-                if str(value or "").strip() == "合计"
-            ]
+            if all(value is None for value in daily):
+                continue
             partial_daily = any(value is None for value in daily)
             daily_sum = sum(value for value in daily if value is not None)
-            if total_columns:
-                total_column = max(total_columns)
-                raw_total = values[total_column] if total_column < len(values) else None
-                total_value = _optional_number(raw_total)
-                if raw_total in (None, "") and partial_daily:
-                    total_value = daily_sum
-                if total_value is None or not math.isfinite(total_value) or total_value < 0:
-                    LOGGER.warning(
-                        "[销量预测字段校验] 传播名=%s | Sheet=%s | 行=%d | 合计=%r无效 | "
-                        "处理=整条真实逐日记录不参与预测",
-                        label, sheet.title, row_number, raw_total,
-                    )
-                    continue
-                total = int(round(total_value))
-                if (not partial_daily and abs(total - daily_sum) > 1) or total < daily_sum - 1:
-                    LOGGER.warning(
-                        "[销量预测字段校验] 传播名=%s | Sheet=%s | 行=%d | 合计=%d与逐日求和=%d不一致 | "
-                        "处理=整条真实逐日记录不参与预测",
-                        label, sheet.title, row_number, total, daily_sum,
-                    )
-                    continue
-            else:
-                total = daily_sum
-                LOGGER.info(
-                    "[销量预测字段校验] 传播名=%s | Sheet=%s | 行=%d | 未提供合计列 | "
-                    "处理=使用全部日期列求和%d，不把最后一个日期误作合计",
-                    label, sheet.title, row_number, total,
-                )
-            # Explicit zero days are observations and retain source priority.
-            # An entirely unknown row still provides no daily facts.
-            if total <= 0 and not any(value is not None for value in daily):
-                continue
             first_header_date = date_columns[0][1]
             generation = _canonical_model(label, model_mapping)
             summary_candidates = [
@@ -510,13 +476,13 @@ def _read_small_order_history(path: Path | None = None, *, today: date | None = 
             if len(matching) > 1:
                 LOGGER.warning(
                     "[映射诊断] 小订历史=%s | 开始日期=%s | 车型汇总命中%d条 | "
-                    "处理=不绑定汇总值，仅使用该传播事件的by天真实合计",
+                    "处理=使用该传播事件的日期列求和",
                     label, first_header_date.isoformat() if first_header_date else "缺失", len(matching),
                 )
             elif not matching:
                 LOGGER.warning(
                     "[映射诊断] 小订历史=%s | 标准代际=%s | 开始日期=%s | "
-                    "处理=未绑定车型汇总，仅使用by天真实合计，不跨传播事件猜测",
+                    "处理=使用该传播事件的日期列求和",
                     label, generation, first_header_date.isoformat() if first_header_date else "缺失",
                 )
             header_dates = [parsed_date for _, parsed_date in date_columns]
@@ -541,15 +507,15 @@ def _read_small_order_history(path: Path | None = None, *, today: date | None = 
             summary_end = _iso(summary.get("小订结束日期"))
             summary_total = _optional_count([summary.get("总小订")], 0)
             if summary_total is not None and summary_total > 0 and (
-                (not partial_daily and abs(summary_total - total) > 1) or summary_total < daily_sum - 1
+                (not partial_daily and abs(summary_total - daily_sum) > 1) or summary_total < daily_sum - 1
             ):
                 LOGGER.debug(
-                    "[销量预测字段校验] 代际=%s | 车型汇总总小订%d与by天合计%d不一致 | "
+                    "[销量预测字段校验] 代际=%s | 车型汇总总小订%d与日期列求和%d不一致 | "
                     "处理=仅为整理表内部初读差异，最终按多来源优先级取值后再校验",
-                    generation, int(round(summary_total)), total,
+                    generation, int(round(summary_total)), daily_sum,
                 )
-            final_total = summary_total if summary_total is not None else total
-            known_total = summary_total if summary_total is not None else total if not partial_daily else None
+            final_total = summary_total if summary_total is not None else daily_sum
+            known_total = None if partial_daily and summary_total is None else final_total
             total_complete = bool(summary_end and summary_end < as_of and known_total is not None)
             running = 0
             cumulative = []
@@ -579,7 +545,7 @@ def _read_small_order_history(path: Path | None = None, *, today: date | None = 
                 "total": final_total,
                 "reported_total": known_total,
                 "total_complete": total_complete,
-                "total_source": "车型汇总" if summary_total is not None else "小订by天合计" if not partial_daily else "小订by天已填累计（非终值）",
+                "total_source": "车型汇总" if summary_total is not None else "小订by天日期列求和" if not partial_daily else "小订by天已填累计（非终值）",
                 "daily_orders": daily if has_daily else [],
                 "dates": dates if has_daily else [],
                 "small_progress": cumulative if has_daily else [],
