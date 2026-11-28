@@ -121,6 +121,7 @@
       }
       if(target.hasSmall===false){message='该车型没有小订阶段，直接进入大定；不需要小订数量或转化率。';}
       else if(target.windowInputErrors?.small){message=target.windowInputErrors.small;}
+      else if(target.hasSmall===null&&!target.smallStartDate&&!target.smallEndDate){message='小订日期待定。';}
       else if(stage.key==='unknown'){message=!target.smallStartDate?'小订开始日期未维护，无法确定小订预测窗口。':!target.smallEndDate?'小订结束日期未维护，无法确定小订预测窗口。':'小订结束日期早于开始日期，请核对时间窗口。';}
       else if(checked.error){message=checked.error;}else if(stage.key==='active'&&checked.missing.length){
         const latest=actualRows.at(-1)?.date||'',present=new Set([...(actual?.small_daily_days||[]),...fallback].map(row=>row.date)),unupdated=latest?checked.missingDates.filter(day=>day>latest&&!present.has(day)):[],gaps=checked.missingDates.filter(day=>!unupdated.includes(day));

@@ -309,8 +309,8 @@ def _read_stage_windows() -> tuple[Path | None, dict[str, dict[str, Any]]]:
                 "secondary_generation": str(record.get("二级代际名") or ""),
                 "history_model": model,
                 "has_small": has_reservation(record, modern="代际名" in headers),
-                "small_start_date": _iso(record.get("小订开始日期")),
-                "small_end_date": _iso(record.get("小订结束日期")),
+                "small_start_date": _iso(_first_record_value(record, "小订开始日期", "小订开始")),
+                "small_end_date": _iso(_first_record_value(record, "小订结束日期", "小订结束")),
                 "launch_date": launch_date,
                 "end_date": end_date,
                 "days": days,
@@ -502,8 +502,11 @@ def _read_small_order_history(path: Path | None = None, *, today: date | None = 
                 record for record in summary_candidates
                 if _model_key(record.get("_model")) == _model_key(label)
             ]
-            matching = dated_candidates or exact_candidates
+            matching = ([r for r in exact_candidates if r in dated_candidates] or
+                        exact_candidates or dated_candidates)
             summary = matching[0] if len(matching) == 1 else {}
+            if summary and has_reservation(summary, modern=modern_names) is False:
+                continue
             if len(matching) > 1:
                 LOGGER.warning(
                     "[映射诊断] 小订历史=%s | 开始日期=%s | 车型汇总命中%d条 | "
@@ -591,6 +594,8 @@ def _read_small_order_history(path: Path | None = None, *, today: date | None = 
             for item in parsed.values()
         }
         for summary in summaries:
+            if has_reservation(summary, modern=modern_names) is False:
+                continue
             generation_key = _model_key(summary.get("_generation"))
             summary_start_key = _iso(summary.get("小订开始日期"))
             if (generation_key, summary_start_key) in parsed_windows:
@@ -986,7 +991,7 @@ def _history_item(record: dict[str, Any], processed: bool) -> dict[str, Any]:
         "model": model,
         "primary_generation": record.get("primary_generation") or record.get("代际名") or model,
         "secondary_generation": record.get("secondary_generation") or record.get("二级代际名") or "",
-        "has_small": record.get("有小订") not in (False, 0, "否"),
+        "has_small": has_reservation(record, modern="代际名" in record or "有小订" in record),
         "generation": str(record.get("代际名") or ""),
         "mapping_status": str(record.get("映射状态") or ("已映射" if record.get("代际名") else "未映射·暂按传播名")),
         "mapped": not str(record.get("映射状态") or "").startswith("未映射") and bool(str(record.get("代际名") or "").strip()),
@@ -1689,7 +1694,7 @@ def _read_actual_profiles(store, stage_windows=None, today=None) -> tuple[list[d
             model = window["generation"]
             start, finish = _as_date(window.get("launch_date")), _as_date(window.get("end_date"))
             profile = profiles[model]
-            if window.get("has_small", True) or profile["days"] or not start or not finish:
+            if window.get("has_small") is not False or profile["days"] or not start or not finish:
                 continue
             actual_days, matched = [], []
             for sheet in order_item.workbook.worksheets:
@@ -2477,11 +2482,14 @@ def _target_options(
             today,
         )
         steady_start = (_as_date(stage.get("end_date")) + timedelta(days=1)).isoformat() if _as_date(stage.get("end_date")) else ""
+        has_small = (window or {}).get("has_small", reference.get("has_small", True) if reference else None)
+        if has_small is None and not (window or {}).get("small_start_date") and not (window or {}).get("small_end_date"):
+            small_stage["label"] = "小订日期待定"
         options.append({
             "name": profile["model"],
             "primary_generation": (window or {}).get("primary_generation") or (master_record or {}).get("primary_generation") or profile["model"],
             "secondary_generation": (window or {}).get("secondary_generation") or (master_record or {}).get("secondary_generation") or "",
-            "has_small": (window or {}).get("has_small", reference.get("has_small", True) if reference else bool(window)),
+            "has_small": has_small,
             "history_model": reference["model"] if reference else "",
             "tier": usable_attribute(master_record.get("产品档位")) if master_record else usable_attribute(reference["tier"] if reference else None),
             "energy": usable_attribute(master_record.get("能源类型")) if master_record else usable_attribute(reference["energy"] if reference else None),
@@ -2558,7 +2566,7 @@ def _apply_small_order_applicability(target, profile):
     """No reservation campaign: direct orders equal gross, not an estimated split."""
     has_small = target.get("has_small", True)
     profile["has_small"] = has_small
-    if has_small:
+    if has_small is not False:
         return
     for candidate in [profile, *profile.get("stage_profiles", {}).values()]:
         candidate["missing_fields"] = [f for f in candidate.get("missing_fields", []) if f != "总小订"]

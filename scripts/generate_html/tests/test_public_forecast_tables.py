@@ -145,7 +145,8 @@ class PublicForecastTablesTests(TestCase):
                                  launch_period or '未维护')
                 book.close()
 
-    def make_public(self, target_start='2026-01-03', customize=None, as_of=date(2026, 1, 4), master_periods=None):
+    def make_public(self, target_start='2026-01-03', customize=None, as_of=date(2026, 1, 4), master_periods=None,
+                    baseline_small=100):
         book = Workbook()
         book.active.title = MASTER_SHEET
         book.active.append(['历史传播名', '订单分析代际名', '产品档位'])
@@ -155,7 +156,7 @@ class PublicForecastTablesTests(TestCase):
             book.active.cell(2, col, value)
         base = book.create_sheet('预测基准总表')
         base.append(['传播名', '代际名', '总大定', '发布日', '首销截止', '总小订'])
-        base.append(['历史车', '测试车', 20, datetime(2026, 1, 3), datetime(2026, 1, 9), 100])
+        base.append(['历史车', '测试车', 20, datetime(2026, 1, 3), datetime(2026, 1, 9), baseline_small])
         metrics = book.create_sheet('D1_D2预测指标')
         metrics.append(['传播名', 'D1大定'])
         metrics.append(['历史车', 20])
@@ -363,6 +364,56 @@ class PublicForecastTablesTests(TestCase):
                          book['直接大定累计完成度'].cell(2, 2).number_format)
         self.assertEqual(book[SMALL_DAILY_SHEET].cell(2, 3).number_format,
                          book['直接大定当日数量'].cell(2, 2).number_format)
+        book.close()
+
+    def test_direct_launch_keeps_daily_facts_without_deriving_a_reservation_reference(self):
+        def customize(data):
+            data['targets'][0].update(has_small=False, small_start_date='', small_end_date='')
+            data['actuals'][0]['small_daily_days'] = [
+                {'date': '2026-01-01', 'orders': 3}, {'date': '2026-01-02', 'orders': 5}]
+            data['small_order_history'][0].update(daily_orders=[3, 5], total=8)
+
+        book = self.make_public(customize=customize, baseline_small=None)
+        master = table_records(book, MASTER_SHEET)[0]
+        self.assertIsNone(master['总小订'])
+        self.assertIs(master['小订参考总量有效'], False)
+        self.assertEqual(table_records(book, SMALL_CURVE_SHEET), [])
+        daily = [r['小订数量'] for r in table_records(book, DAILY_SHEET) if r['小订数量'] is not None]
+        self.assertEqual(daily, [3, 5])
+
+        # An already generated summary may have stale reference rows and totals.
+        sheet = book[MASTER_SHEET]
+        columns = [cell.value for cell in sheet[1]]
+        sheet.cell(2, columns.index('总小订') + 1, 8)
+        sheet.cell(2, columns.index('小订参考总量有效') + 1, True)
+        book[SMALL_CURVE_SHEET].append(['历史车', '已结束'])
+        history = [{'model': '历史车', 'generation': '测试车', 'small': 8, 'conversion': .5}]
+        profiles, windows, references, _ = read_public_forecast(book, history, today=date(2026, 1, 12))
+        self.assertEqual(history[0]['small'], 0)
+        self.assertIsNone(history[0]['conversion'])
+        self.assertEqual(references, [])
+        self.assertIsNone(next(iter(windows.values()))['small'])
+        self.assertEqual(profiles[0]['total_small'], 0)
+        book.close()
+
+    def test_same_name_reservation_is_identified_across_summary_formats(self):
+        book = self.make_public(target_start='2026-01-05')
+        curves = book[SMALL_CURVE_SHEET]
+        for sheet in (curves, book[SMALL_DAILY_SHEET]):
+            self.assertEqual(sheet.cell(1, 3).value, 'D1')
+            self.assertEqual(sheet.cell(1, sheet.max_column).value, '小订开始')
+        start_column = curves.max_column
+        self.assertEqual(curves.cell(2, start_column).value.date(), date(2026, 1, 1))
+        self.assertEqual(read_public_forecast(book, [])[2][0]['daily_orders'], [0, 10])
+
+        # An old narrow table can still identify the sole reservation window.
+        curves.delete_cols(start_column)
+        self.assertEqual(read_public_forecast(book, [])[2][0]['daily_orders'], [0, 10])
+        # A second plausible owner makes that old undated reference ambiguous.
+        master = book[MASTER_SHEET]
+        start_column = [c.value for c in master[1]].index('小订开始') + 1
+        master.cell(2, start_column).value = date(2025, 12, 1)
+        self.assertEqual(read_public_forecast(book, [])[2], [])
         book.close()
 
     def test_small_reference_metadata_survives_narrow_curve_table(self):

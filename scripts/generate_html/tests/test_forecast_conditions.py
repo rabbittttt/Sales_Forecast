@@ -22,7 +22,8 @@ class ForecastConditionTests(unittest.TestCase):
         history[0].update(tier="SUV",energy="纯电",node="标准发布",launch_weekday="周二",launch_period="下午")
         result = _target_options(history, profiles, {}, today=date(2026,9,2))
         self.assertTrue(result[0]["has_small"])
-        self.assertFalse(result[1]["has_small"])
+        self.assertIsNone(result[1]["has_small"])
+        self.assertEqual(result[1]["small_stage_label"], "小订日期待定")
 
     def test_explicit_summary_flag_overrides_generated_reference_membership(self):
         history = [{"model":"直接大定车","launch_date":"2026-09-01","days":3,"small":0}]
@@ -30,6 +31,17 @@ class ForecastConditionTests(unittest.TestCase):
         history[0].update(tier="SUV",energy="纯电",node="标准发布",launch_weekday="周二",launch_period="下午")
         result = _target_options(history, [{"model":"直接大定车"}], {"direct":window}, today=date(2026,9,2))
         self.assertFalse(result[0]["has_small"])
+
+    def test_pending_reservation_keeps_unknown_launch_split(self):
+        target = self.target(has_small=None, small_stage="unknown")
+        profile = {"days": [{"gross": 12, "direct": None, "small_to_big": None}],
+                   "missing_fields": ["总小订"]}
+        _apply_small_order_applicability(target, profile)
+        self.assertIsNone(profile["has_small"])
+        self.assertEqual(profile["missing_fields"], ["总小订"])
+        self.assertIsNone(profile["days"][0]["direct"])
+        self.assertIsNone(profile["days"][0]["small_to_big"])
+        self.assertEqual(target["small_stage"], "unknown")
 
     def test_no_reservation_is_a_business_identity_not_a_ratio_estimate(self):
         target = self.target(has_small=False)

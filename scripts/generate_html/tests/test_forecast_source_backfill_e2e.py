@@ -538,12 +538,32 @@ class SourceBackfillEndToEndTests(TestCase):
         self.assertFalse(item['d1_valid'])
         self.assertIsNone(item['conversion'])
 
+    def test_pending_reservation_survives_forecast_summary(self):
+        def without_observations(path):
+            book = load_workbook(path)
+            del book['小订by天']
+            book.save(path)
+            book.close()
+
+        book = self.build(maintained={'小订开始日期': None, '小订结束日期': None, '总小订': None},
+                          source_edit=without_observations,
+                          launch_quantities={field: [None]*3 for field in (
+                              '当日小订转大定数量', '累计小订转大定数量', '当日直接大定数量', '累计直接大定数量')})
+        master = table_records(book, MASTER_SHEET)[0]
+        self.assertIsNone(master['有小订'])
+        self.assertIsNone(master['总直接大定'])
+        profiles, windows = self.web_inputs(book, date(2026, 9, 5))[1:3]
+        self.assertIsNone(next(iter(windows.values()))['has_small'])
+        self.assertEqual(profiles[0]['days'][0]['gross'], 50)
+        self.assertIsNone(profiles[0]['days'][0]['direct'])
+        self.assertIsNone(profiles[0]['days'][0]['small_to_big'])
+
     def test_no_small_model_preserves_direct_launch_actuals(self):
         def source_edit(path):
             book = load_workbook(path)
             headers = [c.value for c in book['车型汇总'][1]]
             for key in ('小订开始日期', '小订结束日期', '总小订'):
-                book['车型汇总'].cell(2, headers.index(key)+1).value = None
+                book['车型汇总'].cell(2, headers.index(key)+1).value = None if key == '总小订' else 'NA'
             del book['小订by天']
             book.save(path)
             book.close()

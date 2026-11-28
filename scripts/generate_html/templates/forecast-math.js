@@ -89,9 +89,11 @@
       day:key==='before'?0:key==='ended'?span:(current-start)/86400000+1,days:span,start:launchDate,end:finish};
   }
 
-  function smallStage({smallStartDate='', smallEndDate=''} = {}, today) {
+  function smallStage({smallStartDate='', smallEndDate='', hasSmall} = {}, today) {
     const start = dateNumber(smallStartDate), end = dateNumber(smallEndDate), current = dateNumber(today);
     const unknown = label => ({key:'unknown',label,day:0,days:0});
+    if (hasSmall === false) return {key:'not_applicable',label:'无小订阶段',day:0,days:0};
+    if (hasSmall === null && !smallStartDate && !smallEndDate) return unknown('小订日期待定');
     if (!Number.isFinite(start)) return unknown('小订时间缺失');
     if (!Number.isFinite(end)) return unknown('小订结束日期缺失');
     if (end < start) return unknown('小订窗口冲突');

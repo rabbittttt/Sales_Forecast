@@ -1,6 +1,7 @@
 """Read forecast inputs from one workbook while retaining original source identities."""
 from __future__ import annotations
 
+from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import date, datetime, timedelta
@@ -12,6 +13,7 @@ from openpyxl import load_workbook
 
 from core.campaign_source import open_source, preferred_source
 from core.excel import WorkbookItem, WorkbookStore, join_source_texts, source_files_text
+from core.model_identity import has_reservation
 
 SUMMARY_NAME = "鸿蒙智行销量数据汇总.xlsx"
 GUIDE_SHEET = "说明与来源"
@@ -844,12 +846,30 @@ def complete_master_fields(book, masters, headers):
                 f"D1首个正数订单小时：{evidence[1]}" if evidence else "缺少本阶段D1正数分时")
 
 
+def _small_reference_master(row, masters):
+    name = row.get("历史传播名") or row.get("传播名")
+    model = row.get("订单分析代际名")
+    candidates = [r for r in masters if r.get("历史传播名") == name and
+                  (not model or r.get("订单分析代际名") == model)]
+    start = iso_day(row.get("小订开始"))
+    if start:
+        candidates = [r for r in candidates if iso_day(r.get("小订开始")) == start] or candidates
+    elif len(candidates) > 1 and "总小订" not in row:
+        # Older narrow tables lack the start date. Only a unique reservation
+        # window/source can distinguish the reference from a launch-only row.
+        candidates = [r for r in candidates if calendar_day(r.get("小订开始")) or r.get("小订参考来源")]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def refresh_small_reference_tables(book, masters, headers, lookup, emit, today):
     """Finalize reservation quantities once, before launch features consume them."""
     from tools.refresh_sales_forecast_data import cumulative
     curves = table_records(book, SMALL_CURVE_SHEET)
     identities = {(r.get("订单分析代际名"), r.get("历史传播名"), iso_day(r.get("小订开始"))) for r in curves}
     for master in masters:
+        if has_reservation(master) is False:
+            master["小订参考总量有效"] = False
+            continue
         identity = (master.get("订单分析代际名"), master.get("历史传播名"), iso_day(master.get("小订开始")))
         if identity not in identities and identity[2] and iso_day(master.get("小订结束")):
             curves.append(dict(master))
@@ -857,16 +877,15 @@ def refresh_small_reference_tables(book, masters, headers, lookup, emit, today):
     for field in SMALL_REFERENCE_FIELDS:
         if field not in headers:
             headers.append(field)
+    names = Counter(master.get("历史传播名") for master in masters)
+    include_start = any(count > 1 for count in names.values())
     small_daily, small_curves = [], []
     small_span = 0
     for row in curves:
         model, name = row.get("订单分析代际名") or row.get("历史传播名"), row.get("历史传播名")
         start, end = iso_day(row.get("小订开始")), iso_day(row.get("小订结束"))
-        master = next((r for r in masters if r.get("历史传播名") == name and
-                       r.get("订单分析代际名") == model and iso_day(r.get("小订开始")) == start), None)
-        if master is None:
-            master = next((r for r in masters if r.get("历史传播名") == name and r.get("订单分析代际名") == model), None)
-        if master is None:
+        master = _small_reference_master(row, masters)
+        if master is None or has_reservation(master) is False:
             continue
         count = max((date.fromisoformat(end)-date.fromisoformat(start)).days+1, 0) if start and end else int(row.get("小订天数") or 0)
         values = [lookup.get((model, (date.fromisoformat(start)+timedelta(days=i)).isoformat()), {}).get("小订数量")
@@ -885,13 +904,22 @@ def refresh_small_reference_tables(book, masters, headers, lookup, emit, today):
             "小订参考来源": source_text({"file": row.get("来源文件"), "sheet": row.get("来源Sheet")}),
             "小订参考总量有效": ended and isinstance(total, (int, float)) and total > 0})
         status = "未开始" if start and start > today.isoformat() else "进行中" if end and end >= today.isoformat() else "已结束" if end else "时间未维护"
-        small_daily.append([name, status, *values])
-        small_curves.append([name, status, *curve])
+        small_daily.append((name, status, values, start))
+        small_curves.append((name, status, curve, start))
         small_span = max(small_span, count, len(curve))
-    small_headers = ["传播名", "小订阶段", *[f"D{i+1}" for i in range(small_span)]]
+    day_headers = [f"D{i+1}" for i in range(small_span)]
+    small_headers = ["传播名", "小订阶段", *day_headers]
+    if include_start:
+        small_headers.append("小订开始")
     for name, records in ((SMALL_CURVE_SHEET, small_curves), (SMALL_DAILY_SHEET, small_daily)):
-        emit(name, small_headers, [r+[None]*(len(small_headers)-len(r)) for r in records],
-             set(small_headers[2:]) if name == SMALL_CURVE_SHEET else set())
+        rows = []
+        for label, status, days, start in records:
+            row = [label, status, *days] + [None] * (small_span - len(days))
+            if include_start:
+                row.append(date_cell(start))
+            rows.append(row)
+        emit(name, small_headers, rows,
+             set(day_headers) if name == SMALL_CURVE_SHEET else set())
 
 
 def refresh_small_cancel_reference(masters, data, emit):
@@ -952,6 +980,8 @@ def refresh_reference_tables(book, data, emit, daily, today):
     for r in masters:
         model = r.get("订单分析代际名")
         profile = actuals.get(model, {})
+        if has_reservation(r) is False:
+            continue
         if r.get("总小订") in (None, "") and iso_day(r.get("首销开始")) == targets.get(model, {}).get("launch_date") and profile.get("total_small", 0) > 0:
             r["总小订"] = profile["total_small"]
     refresh_small_reference_tables(book, masters, headers, lookup, emit, today)
@@ -1100,7 +1130,7 @@ def restrict_launch_reference(item, master, today):
             item[field] = None
         for field in ("small_progress", "direct_progress", "gross_progress"):
             item[field] = []
-    if master.get("小订参考总量有效") is False:
+    if master.get("小订参考总量有效") is False or has_reservation(master) is False:
         item["small"] = 0
         for field in ("conversion", "cancel_rate", "d1_cancel_rate", "d2_cancel_rate", "d12_cancel_rate"):
             item[field] = None
@@ -1167,11 +1197,11 @@ def read_public_forecast(book, history, today=None):
         model = row["订单分析代际名"]
         if model in by_model:
             continue
-        small_total = row.get("总小订") if row.get("小订参考总量有效", True) else None
+        small_total = row.get("总小订") if row.get("小订参考总量有效", True) and has_reservation(row) is not False else None
         windows[model_key(model)] = {"generation": model, "history_model": row.get("历史传播名"),
             "primary_generation": row.get("primary_generation") or model,
             "secondary_generation": row.get("secondary_generation") or "",
-            "has_small": row.get("有小订") not in (False, 0, "否"),
+            "has_small": has_reservation(row),
             "launch_date": calendar_day(row.get("首销开始")), "end_date": calendar_day(row.get("首销结束")),
             "small_start_date": calendar_day(row.get("小订开始")), "small_end_date": calendar_day(row.get("小订结束")),
             "days": row.get("首销天数"), "small": small_total, "source_sheet": MASTER_SHEET}
@@ -1285,9 +1315,13 @@ def read_public_forecast(book, history, today=None):
     small = []
     curve_sheet = SMALL_CURVE_SHEET if SMALL_CURVE_SHEET in book.sheetnames else LEGACY_SMALL_CURVE_SHEET
     for row in table_records(book, curve_sheet):
+        master = _small_reference_master(row, masters)
+        if master is not None and has_reservation(master) is False:
+            continue
         if "总小订" not in row:
-            identity = row.get("历史传播名") or row.get("传播名")
-            metadata = next((m for m in masters if m.get("历史传播名") == identity), {})
+            if master is None:
+                continue
+            metadata = master
             filename, source_sheet = _source_parts(metadata.get("小订参考来源"))
             row = {**metadata, **row, "总小订": metadata.get("总小订"),
                    "总量来源": metadata.get("小订总量来源"), "来源文件": filename, "来源Sheet": source_sheet}

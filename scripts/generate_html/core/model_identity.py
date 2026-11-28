@@ -7,6 +7,7 @@ from typing import Any
 
 from core.campaign_source import campaign_batch, edition_signature, is_edition, open_source, preferred_source, source_available
 from core.data_paths import orders_input_directory
+from core.forecast_calendar import _as_date
 
 
 CODE_ROOT = Path(__file__).resolve().parents[2]
@@ -79,17 +80,21 @@ def stage_name(record: dict) -> str:
     return str(record.get("二级代际名") or record.get("代际名") or record.get("车型") or record.get("历史传播名") or "").strip()
 
 
-def has_reservation(record: dict, *, modern=True) -> bool:
-    """The integrated attributes sheet also contains direct-launch vehicles."""
+def has_reservation(record: dict, *, modern=True) -> bool | None:
+    """False is explicit direct launch. None means the schedule is still pending."""
     marker = record.get("有小订")
     if marker not in (None, ""):
         return marker not in (False, 0, "否", "无", "false", "False")
-    if not modern:
-        return True  # Legacy small-order-only roster.
-    return any(record.get(k) not in (None, "") for k in
-               ("小订开始日期", "小订结束日期", "小订开始", "小订结束")) or any(
-        isinstance(record.get(k), (int, float)) and record[k] > 0
-        for k in ("总小订", "小订天数"))
+    dates = [record.get(key) for key in ("小订开始日期", "小订结束日期", "小订开始", "小订结束")
+             if record.get(key) not in (None, "")]
+    if dates and all(str(value).strip().upper() in {"NA", "N/A", "#N/A"} for value in dates):
+        return False
+    if not modern or any(_as_date(value) for value in dates):
+        return True  # Legacy reservation-only roster, or a maintained reservation date.
+    if any(isinstance(record.get(key), (int, float)) and record[key] > 0
+           for key in ("总小订", "小订天数")):
+        return True
+    return None
 
 
 def stage_records(path) -> list[dict]:

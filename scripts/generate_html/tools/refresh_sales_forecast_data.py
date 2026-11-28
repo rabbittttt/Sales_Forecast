@@ -438,6 +438,8 @@ def extract_quantity_table(
     workbook,
     header_index: dict[str, HeaderScan],
     role: str,
+    *,
+    allow_empty: bool = False,
 ) -> tuple[dict[str, list[Any]], int, str, int]:
     from modules.sales_forecast import _optional_count
     sheet, header_row, headers, day_column_pairs = find_progress_sheet(workbook, role, header_index)
@@ -452,7 +454,6 @@ def extract_quantity_table(
     if missing_days:
         LOGGER.warning("%s缺少%s列，对应日期将在二次处理表留空", sheet.title, compact_diagnostic_ranges(f"D{n}" for n in missing_days))
     result: dict[str, list[Any]] = {}
-    blank_rows = 0
     for row_number, values in enumerate(sheet.iter_rows(min_row=header_row + 1, values_only=True), header_row + 1):
         model_value = values[model_column] if model_column < len(values) else None
         if canonical_header(model_value) == "车型":
@@ -461,10 +462,10 @@ def extract_quantity_table(
         model = str(record.get("二级代际名") or model_value or "").strip()
         model = resolve_stage_identity(model, generation_records(), record.get("开始大定日期")) or model
         has_day_value = any(index < len(values) and values[index] not in (None, "") for index in day_columns.values())
+        if not model and allow_empty and has_day_value:
+            raise InputFormatError(f"{sheet.title}第{row_number}行有数据但传播名为空")
         if not model and not has_day_value:
-            blank_rows += 1
             continue
-        blank_rows = 0
         if canonical_header(model) == "车型":
             break
         if not model:
@@ -477,7 +478,7 @@ def extract_quantity_table(
             _optional_count(values, day_columns[number]) if number in day_columns else None
             for number in range(1, day_count + 1)
         ]
-    if not result:
+    if not result and not allow_empty:
         raise InputFormatError(f"{sheet.title}第{header_row}行识别为表头，但首个数量表没有传播名数据")
     return result, day_count, sheet.title, header_row
 
@@ -487,7 +488,7 @@ def extract_first_quantity_table(source: Path, role: str) -> tuple[dict[str, lis
     workbook = open_source(source, read_only=True, data_only=True)
     try:
         header_index = workbook_header_index(workbook)
-        return extract_quantity_table(workbook, header_index, role)
+        return extract_quantity_table(workbook, header_index, role, allow_empty=is_edition(source))
     finally:
         workbook.close()
 
@@ -638,7 +639,7 @@ def _build_secondary(source, output, mapping_path, orders_dir, as_of_date, datab
         for target_name in ("small", "direct", "gross", "cancel", "small_cancel"):
             try:
                 curves, count, recognized_sheet, header_row = extract_quantity_table(
-                    source_workbook, header_index, target_name,
+                    source_workbook, header_index, target_name, allow_empty=is_edition(source),
                 )
             except MissingProgressSheet:
                 if target_name not in {"cancel", "small_cancel"}:
@@ -1266,7 +1267,7 @@ def forecast_weekly_orders(store, dashboard, today, daily_output=None, *, collec
             if model not in targets:
                 if subject_type(model) != "generation":
                     continue
-                target = {"name": model, "history_model": model, "stage": "unknown", "has_small": False}
+                target = {"name": model, "history_model": model, "stage": "unknown", "has_small": None}
                 targets[model] = target
                 data.setdefault("targets", []).append(target)
             metric = ""

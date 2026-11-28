@@ -192,6 +192,25 @@ class SalesForecastStageTests(unittest.TestCase):
             ("鸿蒙智行锁单选配比例分析.xlsx", "问界 M9 2026款by周", "预测候选代际"),
         ])
 
+    def test_direct_launch_edition_has_no_reservation_reference(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "小订及首销数据整理.xlsx"
+            book = Workbook()
+            sheet = book.active
+            first, second = datetime(2026, 1, 1), datetime(2026, 1, 2)
+            sheet.append(["代际名", "二级代际名", "开始大定日期", "有小订", "小订开始日期", "小订结束日期", "总小订"])
+            sheet.append(["同代际", "首发版", second, True, first, second, 12])
+            sheet.append(["同代际", "增补版", second, False, None, None, 8])
+            daily = book.create_sheet("小订by天")
+            daily.append(["代际名", "二级代际名", first, second])
+            daily.append(["同代际", "增补版", 3, 5])
+            daily.append(["同代际", "首发版", 4, 8])
+            book.save(path)
+            book.close()
+            with patch("modules.sales_forecast._read_model_mapping", return_value={}), patch("modules.sales_forecast._read_model_master", return_value={}):
+                _, rows = _read_small_order_history(path, today=date(2026, 1, 4))
+        self.assertEqual([(r["model"], r["daily_orders"], r["total"]) for r in rows], [("首发版", [4, 8], 12)])
+
     def test_small_order_history_prefers_actual_by_day_curve(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "小订及首销数据整理.xlsx"

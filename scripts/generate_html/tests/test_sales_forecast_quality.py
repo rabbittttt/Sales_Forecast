@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 import unittest
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from openpyxl import Workbook, load_workbook
 
+from core.forecast_headers import InputFormatError
+from tools.refresh_sales_forecast_data import extract_first_quantity_table
 from tools.refresh_sales_forecast_data import cumulative, curve_for, day_structure_quality, mapping_record_for, summary_quality, extract_quantity_table, workbook_header_index, combine_daily, build_secondary
 
 
@@ -41,6 +46,46 @@ class SalesForecastQualityTests(unittest.TestCase):
                     self.assertAlmostEqual(actual, expected)
             finally:
                 result.close()
+
+    def test_published_progress_can_be_empty_but_must_have_valid_headers_and_rows(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "campaigns.sqlite3"
+            payload = {"sheets": [
+                {"name": "车型汇总", "headerRows": [1], "rows": [["代际名"]]},
+                {"name": "小转大进度", "headerRows": [1, 2], "rows": []},
+            ]}
+            header = ["代际名", "D1", "D2", "二级代际名"]
+            with closing(sqlite3.connect(source)) as db:
+                db.execute("CREATE TABLE draft (id INTEGER PRIMARY KEY, published_revision INTEGER)")
+                db.execute("CREATE TABLE publications (revision INTEGER PRIMARY KEY, data TEXT)")
+                db.execute("INSERT INTO draft VALUES (1,1)")
+
+                def publish(rows, headers):
+                    payload["sheets"][1].update(rows=rows, headerRows=headers)
+                    db.execute("INSERT OR REPLACE INTO publications VALUES (1,?)", (json.dumps(payload),))
+                    db.commit()
+
+                publish([header, header], [1, 2])
+                self.assertEqual(extract_first_quantity_table(source, "small"), ({}, 2, "小转大进度", 1))
+                annotated_header = [*header, "大定"]
+                note = [None, None, None, None, "每日直接大定占比 = 当日直接大定/当日总大定"]
+                publish([annotated_header, note, annotated_header], [1, 3])
+                self.assertEqual(extract_first_quantity_table(source, "small")[0], {})
+                publish([header, [None, 0], header], [1, 3])
+                with self.assertRaisesRegex(InputFormatError, "传播名为空"):
+                    extract_first_quantity_table(source, "small")
+                publish([["代际名", "D1", "D1"]], [1])
+                with self.assertRaisesRegex(InputFormatError, "重复天数列"):
+                    extract_first_quantity_table(source, "small")
+
+            legacy = Path(directory) / "legacy.xlsx"
+            book = Workbook()
+            book.active.title = "小转大进度"
+            book.active.append(header)
+            book.save(legacy)
+            book.close()
+            with self.assertRaisesRegex(InputFormatError, "没有传播名数据"):
+                extract_first_quantity_table(legacy, "small")
 
     def test_partial_quantity_block_is_not_replaced_by_longer_percentage_block(self):
         book = Workbook()

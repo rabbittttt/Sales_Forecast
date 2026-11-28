@@ -29,7 +29,7 @@ class MissingSourceMatrixTests(TestCase):
             if not reservation:
                 headers = [c.value for c in book['车型汇总'][1]]
                 for field in ('小订开始日期', '小订结束日期', '总小订'):
-                    book['车型汇总'].cell(2, headers.index(field)+1).value = None
+                    book['车型汇总'].cell(2, headers.index(field)+1).value = None if field == '总小订' else 'NA'
                 del book['小订by天']
             book.save(path)
             book.close()

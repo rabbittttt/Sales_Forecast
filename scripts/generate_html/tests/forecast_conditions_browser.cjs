@@ -7,7 +7,7 @@ url.search=new URLSearchParams({module:'sales_forecast',subject:'问界 M9 2026�
  const browser=await chromium.launch({headless:true,channel:'msedge'}),errors=[];let checks=0;
  const check=(label,ok)=>{assert(ok,label);checks++;console.log('PASS '+label)};
  try{
-  for(const scenario of ['no_small','missing_total','ended_components','unknown_window','missing_direct','invalid_rows','unknown_issue','conflicting_window','hourly_mismatch']){
+  for(const scenario of ['no_small','pending','missing_total','ended_components','unknown_window','missing_direct','invalid_rows','unknown_issue','conflicting_window','hourly_mismatch']){
    const context=await browser.newContext({viewport:{width:1440,height:1000}});
    await context.addInitScript(({scenario})=>{
     const parse=JSON.parse;
@@ -18,26 +18,36 @@ url.search=new URLSearchParams({module:'sales_forecast',subject:'问界 M9 2026�
       if(data.config&&data.subjects)data.config.forecast_as_of_date='2026-09-30';
       if(data.target&&Array.isArray(data.history)&&Array.isArray(data.actuals)){
        const name='问界 M9 2026款',same=value=>String(value||'').replace(/\s/g,'')===name.replace(/\s/g,'');
-       const hasSmall=scenario!=='no_small',end=scenario==='conflicting_window'?'2026-09-27':scenario==='ended_components'?'2026-09-29':'2026-10-07';
+       const pending=scenario==='pending',hasSmall=pending?null:scenario!=='no_small',end=scenario==='conflicting_window'?'2026-09-27':scenario==='ended_components'?'2026-09-29':'2026-10-07';
        for(const target of [data.target,...data.targets||[]])if(same(target.name))Object.assign(target,{
         has_small:hasSmall,launch_date:scenario==='unknown_window'?'':'2026-09-28',end_date:end,days:scenario==='ended_components'?2:10,
         launch_days_maintained:true,steady_start_date:end==='2026-09-29'?'2026-09-30':'2026-10-08',
-        small:0,small_start_date:'2026-09-01',small_end_date:hasSmall?'2026-09-27':'',
+        small:0,small_start_date:hasSmall?'2026-09-01':'',small_end_date:hasSmall?'2026-09-27':'',
         hard_errors:[],validation_issues:[],data_error:false
        });
+       if(pending){
+        for(const target of [data.target,...data.targets||[]])if(same(target.name))Object.assign(target,{
+         total_small:0,small_days:0,small_stage:'unknown',small_calendar_day:0
+        });
+        // No maintained preorder window or observations for this campaign.
+        const otherCampaign=item=>!same(item.model)&&!same(item.generation);
+        data.small_order_history=(data.small_order_history||[]).filter(otherCampaign);
+        data.history=data.history.filter(otherCampaign);
+       }
        for(const item of data.history)Object.assign(item,{
         launch_date:'2026-08-01',end_date:'2026-08-10',
         days:10,daily_orders:Array(10).fill(10),daily_small:Array(10).fill(4),daily_direct:Array(10).fill(6),
         direct_progress:Array.from({length:10},(_,i)=>(i+1)/10),small_progress:Array.from({length:10},(_,i)=>(i+1)/10)
        });
        const rows=[100,80].map((gross,index)=>({date:'2026-09-'+(28+index),day:'D'+(index+1),gross,lock:gross*.8,
-        small_to_big:scenario==='ended_components'||scenario==='no_small'?null:gross*.4,
-        direct:['ended_components','no_small','missing_direct'].includes(scenario)?null:gross*.6}));
+        small_to_big:scenario==='ended_components'||hasSmall!==true?null:gross*.4,
+        direct:['ended_components','missing_direct'].includes(scenario)||hasSmall!==true?null:gross*.6}));
        if(scenario==='invalid_rows')rows[1].gross=null;
        const issues=scenario==='invalid_rows'?[{code:'COMPLETED_DAYS_INVALID',message:'来源旧窗口中有异常记录'}]:
         scenario==='unknown_issue'?[{code:'CUSTOM_SOURCE_BLOCKER',message:'不可忽略的来源异常'}]:[];
        for(const profile of data.actuals)if(same(profile.model)){
         for(const candidate of [profile,...Object.values(profile.stage_profiles||{})])Object.assign(candidate,{
+         ...(pending?{small_daily_days:[],small_hourly_days:[]}:{}),
          days:rows.map(row=>({...row})),total_small:0,hourly_days:scenario==='hourly_mismatch'?[{date:'2026-09-30',gross:50,small_to_big:null,direct:null,lock:null,last_hour:15,hours:[{hour:15,gross:50}],component_status:'日/时大定数量不一致'}]:[],hard_errors:issues.map(issue=>issue.message),validation_issues:issues,data_error:!!issues.length,has_small:hasSmall});
        }
       }
@@ -65,10 +75,19 @@ url.search=new URLSearchParams({module:'sales_forecast',subject:'问界 M9 2026�
     await completion.fill('');await completion.dispatchEvent('change');
     await page.waitForFunction(()=>document.querySelector('.forecast-workspace')._forecastComparison.scenarios.progress.available);
     check('清空人工完成率恢复原有结果',await page.locator('.forecast-workspace').evaluate((root,original)=>root._forecastComparison.scenarios.progress.gross===original,result.scenarios.progress.gross));
-    await page.locator('[data-forecast-stage-switch="small"]').click();
+    await page.locator('[data-forecast-nav="small"]').click();
     check('小订明确不适用而非原始数据错误',(await page.locator('[data-small-error]').innerText()).includes('不适用'));
-    await page.locator('[data-forecast-stage-switch="steady"]').click();
+    await page.locator('[data-forecast-nav="steady"]').click();
     check('无小订仍可从首销预测接入平销',await page.locator('[data-steady-error]').isHidden());
+   }else if(scenario==='pending'){
+    check('待定车型保留两日实际大定',result.rows.length===2&&result.rows[0].gross===100&&result.rows[1].gross===80);
+    check('待定车型首销分项保持未知',result.rows.every(row=>row.actual&&row.small_to_big===null&&row.direct===null));
+    await page.locator('[data-forecast-nav="small"]').click();
+    const smallNotice=await page.locator('[data-small-error]').innerText();
+    check('小订页显示日期待定',smallNotice.includes('小订日期待定')&&!smallNotice.includes('不适用'));
+    await page.locator('[data-forecast-nav="launch"]').click();
+    await page.locator('[data-forecast-tab="evidence"]').click();
+    check('返回首销后保留小订输入',await page.locator('[data-forecast-input="small"]').isVisible());
    }else if(scenario==='missing_total'){
     check('缺总小订不阻断方法一',result.scenarios.progress.available);
     check('缺总小订只限制方法二',!result.scenarios.parameter.available&&notice.includes('方法二')&&!notice.includes('方法一：'));

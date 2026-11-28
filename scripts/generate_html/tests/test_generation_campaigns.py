@@ -67,7 +67,7 @@ class GenerationCampaignTests(TestCase):
                 _, windows = _read_stage_windows()
             self.assertEqual(len(windows), 2)
             for window in windows.values():
-                self.assertFalse(window['has_small'])
+                self.assertIsNone(window['has_small'])
                 self.assertEqual(window['end_date'], '2026-09-05')
                 self.assertEqual(window['days'], 5)
 
@@ -169,7 +169,9 @@ class GenerationCampaignTests(TestCase):
         self.assertNotIn('总小订', parent)
 
     def test_attribute_only_modern_rows_are_not_small_order_vehicles(self):
-        self.assertFalse(has_reservation({'代际名': '无小订车', '总小订': 0}))
+        self.assertIsNone(has_reservation({'代际名': '待定车', '总小订': 0}))
+        for marker in ('NA', 'n/a', '#N/A'):
+            self.assertIs(has_reservation({'小订开始日期': marker, '总小订': 100}), False)
         self.assertTrue(has_reservation({'代际名': '小订车', '小订开始日期': date(2026, 1, 1)}))
         self.assertTrue(has_reservation({'代际名': '小订车', '有小订': True}))
         self.assertFalse(has_reservation({'有小订': False, '总小订': 100}))
